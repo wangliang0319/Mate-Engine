@@ -179,6 +179,34 @@ public class SaveLoadHandler : MonoBehaviour
 
         public bool enableLocomotion = false;
 
+        // ---------- Douyin Live ----------
+        public bool enableDouyinLive = false;
+        public string douyinWsUrl = "ws://127.0.0.1:8888";
+        public bool douyinWelcomeEnabled = true;
+        public bool douyinAIReplyEnabled = true;
+        public bool douyinLikeReactEnabled = true;
+        public bool douyinGiftEnabled = true;
+        public float douyinWelcomeCooldown = 8f;
+        public float douyinAIReplyMinInterval = 8f;
+        public int douyinLikeThreshold = 100;
+        public string douyinLivePrompt = "";
+
+        // Cloud AI (OpenAI 兼容)
+        public string aiBaseUrl = "";
+        public string aiApiKey = "";
+        public string aiModel = "";
+        public bool aiFallbackToLocal = true;
+
+        // TTS: 0=OpenAI兼容 1=EdgeTTS 2=Local(预留) 3=关闭(纯气泡)
+        public int ttsProvider = 1;
+        public string ttsBaseUrl = "";
+        public string ttsApiKey = "";
+        public string ttsModel = "";
+        public string ttsVoice = "";
+        public string ttsEdgeVoice = "zh-CN-XiaoxiaoNeural";
+        public float ttsVolume = 1f;
+        public float ttsSpeed = 1f;
+        public float lipSyncGain = 1f;
 
         //ALARM
         [Serializable]

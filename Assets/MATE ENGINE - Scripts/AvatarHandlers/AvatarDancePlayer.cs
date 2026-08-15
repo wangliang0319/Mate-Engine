@@ -986,6 +986,26 @@ namespace CustomDancePlayer
             return -1;
         }
 
+        public int EntryCount => entries.Count;
+        public string GetEntryTitle(int index) => (index >= 0 && index < entries.Count) ? entries[index].id : null;
+
+        // Case-insensitive substring match (both directions) for danmaku song requests.
+        public int FindIndexByTitleFuzzy(string title)
+        {
+            if (string.IsNullOrEmpty(title)) return -1;
+            int exact = FindIndexByTitle(title);
+            if (exact >= 0) return exact;
+            string t = title.Trim().ToLowerInvariant();
+            for (int i = 0; i < entries.Count; i++)
+            {
+                var id = entries[i].id;
+                if (string.IsNullOrEmpty(id)) continue;
+                var e = id.ToLowerInvariant();
+                if (e.Contains(t) || t.Contains(e)) return i;
+            }
+            return -1;
+        }
+
         bool IsModEnabled(string id)
         {
             if (SaveLoadHandler.Instance == null || SaveLoadHandler.Instance.data == null) return true;
