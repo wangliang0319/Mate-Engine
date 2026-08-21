@@ -39,7 +39,7 @@ namespace DouyinLive
 
         string SystemPrompt =>
             "你是一个桌面宠物虚拟主播，正在抖音直播。观众会发弹幕，你要用活泼、简短、口语化的中文回应。" +
-            "规则：回复不超过50个字；不要使用表情符号、颜文字、markdown或任何特殊符号；" +
+            "规则：回复必须精简，一般一句话，最多不超过30个字；不要使用表情符号、颜文字、markdown或任何特殊符号；" +
             "语气亲切自然，适合直接朗读出来；直接说内容，不要加引号或前缀。" +
             (string.IsNullOrEmpty(ExtraPersona) ? "" : ("你的人设补充：" + ExtraPersona));
 
@@ -157,7 +157,7 @@ namespace DouyinLive
             s = s.Trim().Trim('"', '“', '”', '\'');
             // 移除 emoji 与 markdown 痕迹，保证适合朗读
             s = Regex.Replace(s, @"[\p{So}\p{Sk}*#`_~\[\]]", "");
-            if (s.Length > 120) s = s.Substring(0, 120);
+            if (s.Length > 60) s = s.Substring(0, 60);
             return s.Trim();
         }
 

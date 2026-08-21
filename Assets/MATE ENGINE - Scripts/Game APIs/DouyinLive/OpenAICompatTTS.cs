@@ -18,6 +18,8 @@ namespace DouyinLive
         public string Model = "tts-1";
         public string Voice = "alloy";
         public float Speed = 1f;
+        // gpt-4o-mini-tts 风格指令：消除中文“洋腔”的关键
+        public string Instructions = "";
 
         public bool IsAvailable =>
             !string.IsNullOrWhiteSpace(BaseUrl) && !string.IsNullOrWhiteSpace(ApiKey);
@@ -26,14 +28,16 @@ namespace DouyinLive
 
         public async Task<TTSResult> SynthesizeAsync(string text, CancellationToken ct)
         {
-            var body = JsonConvert.SerializeObject(new
+            var payload = new System.Collections.Generic.Dictionary<string, object>
             {
-                model = Model,
-                input = text,
-                voice = Voice,
-                speed = Speed,
-                response_format = "mp3"
-            });
+                ["model"] = Model,
+                ["input"] = text,
+                ["voice"] = Voice,
+                ["speed"] = Speed,
+                ["response_format"] = "mp3"
+            };
+            if (!string.IsNullOrWhiteSpace(Instructions)) payload["instructions"] = Instructions;
+            var body = JsonConvert.SerializeObject(payload);
 
             using var req = new HttpRequestMessage(HttpMethod.Post, BaseUrl.Trim().TrimEnd('/') + "/audio/speech");
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ApiKey);

@@ -39,6 +39,9 @@ namespace DouyinLive
         public async Task<TTSResult> SynthesizeAsync(string text, CancellationToken ct)
         {
             using var ws = new ClientWebSocket();
+            // 必须绕开系统代理：DouyinBarrageGrab 抓包时会设置系统代理，
+            // EdgeTTS 的 wss 若走代理会被拦截导致合成失败（无声）。
+            ws.Options.Proxy = null;
             ws.Options.SetRequestHeader("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold");
             ws.Options.SetRequestHeader("User-Agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0");

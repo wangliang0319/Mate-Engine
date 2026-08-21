@@ -43,13 +43,24 @@ namespace DouyinLive
 
         [Header("Bubble")]
         public Transform chatContainer;
+        public bool transparentBubble = true;   // 只显示文字，不渲染气泡背景
+        public enum BubbleAnchor { Above, Left, Right }
+
+        public bool followAvatarHead = true;    // 文字跟随角色
+        public BubbleAnchor bubbleAnchor = BubbleAnchor.Right;  // 默认在角色右侧
+        public float headClearance = 0.05f;     // 头骨上方的世界空间偏移(米)
+        public float sideClearance = 0.18f;     // 侧边模式：距头部中线的世界偏移(米)
+        public Vector2 followOffset = new Vector2(0f, 0f);  // 额外像素偏移
         public Sprite bubbleSprite;
         public Material bubbleMaterial;
         public Color bubbleColor = new Color32(255, 120, 160, 255);
-        public Color fontColor = Color.white;
+        public Color fontColor = new Color(1f, 0.96f, 0.75f, 1f);  // 暖黄白，直播画面醒目
         public Font font;
-        public int fontSize = 16;
-        public int bubbleWidth = 600;
+        public int fontSize = 30;
+        public int bubbleWidth = 360;
+        public bool boldText = true;
+        public Color outlineColor = new Color(0.1f, 0.05f, 0.15f, 1f);  // 深紫黑描边
+        public float outlineThickness = 2f;
         public float textPadding = 10f;
         public float bubbleSpacing = 10f;
         public float bubbleLinger = 3f;   // 说完后气泡停留
@@ -57,6 +68,10 @@ namespace DouyinLive
         [Header("Fallback (no TTS)")]
         [Range(5, 100)] public int streamSpeed = 35;
         public float fallbackLinger = 6f;
+
+        [Header("Emotion")]
+        public bool emotionFromText = true;     // 按说话内容驱动表情/反应动作
+        [Range(0f, 1f)] public float emotionStrength = 0.8f;
 
         public ITTSProvider Provider;        // 主 TTS
         public ITTSProvider FallbackProvider; // 备选（EdgeTTS）
@@ -70,6 +85,8 @@ namespace DouyinLive
         LLMUnitySamples.Bubble activeBubble;
         Animator avatarAnimator;
         UniversalBlendshapes blendshapes;
+        Transform headBone;
+        Camera uiCam;
         float lipWeight;
         float[] rmsBuf = new float[256];
 
@@ -80,12 +97,59 @@ namespace DouyinLive
         {
             RefreshAvatarRefs();
             DriveLipSync();
+            DriveEmotion();
+            FollowHead();
 
             if (!speaking)
             {
                 var item = DequeueBest();
                 if (item != null)
                     speakRoutine = StartCoroutine(SpeakRoutine(item));
+            }
+        }
+
+        // 弹幕文字锚定在角色头顶上方
+        void FollowHead()
+        {
+            if (!followAvatarHead || activeBubble == null) return;
+            if (headBone == null || uiCam == null) return;
+            var canvasRT = chatContainer as RectTransform;
+            if (canvasRT == null) return;
+
+            float scale = Mathf.Max(0.2f, headBone.lossyScale.magnitude);
+            Vector3 anchorWorld;
+            Vector2 pivot;
+            switch (bubbleAnchor)
+            {
+                case BubbleAnchor.Left:
+                    // 屏幕视角的左侧 = 相机 right 的负方向
+                    anchorWorld = headBone.position - uiCam.transform.right * sideClearance * scale;
+                    pivot = new Vector2(1f, 0.5f);   // 右边缘贴角色，文字向左伸展
+                    break;
+                case BubbleAnchor.Right:
+                    anchorWorld = headBone.position + uiCam.transform.right * sideClearance * scale;
+                    pivot = new Vector2(0f, 0.5f);   // 左边缘贴角色，文字向右伸展
+                    break;
+                default:
+                    anchorWorld = headBone.position + Vector3.up * headClearance * scale;
+                    pivot = new Vector2(0.5f, 0f);   // 底边中心，向上增长
+                    break;
+            }
+            Vector3 screen = uiCam.WorldToScreenPoint(anchorWorld);
+            if (screen.z <= 0f) return; // 头在相机后方，保持原位
+
+            var rt = activeBubble.GetRectTransform();
+            // 屏幕坐标 → chatContainer 本地坐标
+            Camera camForCanvas = null;
+            var canvas = canvasRT.GetComponentInParent<Canvas>();
+            if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                camForCanvas = canvas.worldCamera != null ? canvas.worldCamera : uiCam;
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    canvasRT, (Vector2)screen + followOffset, camForCanvas, out var local))
+            {
+                rt.pivot = pivot;
+                rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+                rt.anchoredPosition = local;
             }
         }
 
@@ -105,9 +169,12 @@ namespace DouyinLive
             {
                 avatarAnimator = model.GetComponentInChildren<Animator>(true);
                 blendshapes = model.GetComponentInChildren<UniversalBlendshapes>(true);
+                if (avatarAnimator != null && avatarAnimator.isHuman)
+                    headBone = avatarAnimator.GetBoneTransform(HumanBodyBones.Head);
             }
             if (blendshapes == null)
                 blendshapes = FindFirstObjectByType<UniversalBlendshapes>();
+            if (uiCam == null) uiCam = Camera.main;
         }
 
         // ---------- 入队 ----------
@@ -169,7 +236,8 @@ namespace DouyinLive
             }
 
             ShowBubble("");
-            if (avatarAnimator != null) avatarAnimator.SetBool("isTalking", true);
+            // 注意：isTalking 延迟到第一句音频实际开播时再设，
+            // 否则 TTS 合成的 1~2 秒里嘴已在动、声音未到（口型超前）。
 
             // 流水线：预取下一句的合成任务
             var synths = new List<SynthSentence>();
@@ -211,6 +279,8 @@ namespace DouyinLive
                     voiceSource.volume = volume;
                     voiceSource.Play();
                     anyPlayed = true;
+                    if (avatarAnimator != null) avatarAnimator.SetBool("isTalking", true);
+                    ApplyEmotionFromText(cur.Text);
                     while (voiceSource != null && voiceSource.isPlaying)
                     {
                         // P0 打断：句间检查在循环外，句内不打断
@@ -296,6 +366,65 @@ namespace DouyinLive
             RemoveBubble();
         }
 
+        // ---------- 内容驱动表情/动作 ----------
+
+        // Joy/Fun/Sorrow/Angry 由 UniversalBlendshapes 双版本(VRM0/1)映射；
+        // HoverFaceTrigger 是现有摸脸反应动画，借来当"开心互动"动作。
+        enum Emotion { None, Happy, Love, Sad, Surprise }
+
+        Emotion currentEmotion = Emotion.None;
+        float emotionUntil;
+
+        static readonly (string[] keys, Emotion emo)[] EmotionRules =
+        {
+            (new[]{ "谢谢", "感谢", "开心", "太好", "棒", "耶", "哈哈", "笑", "好呀", "欢迎" }, Emotion.Happy),
+            (new[]{ "爱你", "抱抱", "么么", "喜欢", "笔芯", "亲亲", "心动", "宝贝" }, Emotion.Love),
+            (new[]{ "呜呜", "难过", "伤心", "抱歉", "对不起", "可惜", "找不到" }, Emotion.Sad),
+            (new[]{ "哇", "天呐", "厉害", "突破", "太强", "惊", "！！" }, Emotion.Surprise),
+        };
+
+        void ApplyEmotionFromText(string sentence)
+        {
+            if (!emotionFromText || string.IsNullOrEmpty(sentence)) return;
+            foreach (var (keys, emo) in EmotionRules)
+                foreach (var k in keys)
+                    if (sentence.Contains(k))
+                    {
+                        currentEmotion = emo;
+                        emotionUntil = Time.unscaledTime + Mathf.Clamp(sentence.Length * 0.22f, 1.5f, 6f);
+                        // 开心/亲昵时触发一次摸脸反应动作（挥手互动感）
+                        if ((emo == Emotion.Happy || emo == Emotion.Love) && avatarAnimator != null)
+                        {
+                            var p = System.Array.Find(avatarAnimator.parameters,
+                                x => x.name == "HoverFaceTrigger" && x.type == AnimatorControllerParameterType.Bool);
+                            if (p != null) StartCoroutine(PulseBool("HoverFaceTrigger", 0.4f));
+                        }
+                        return;
+                    }
+        }
+
+        IEnumerator PulseBool(string param, float seconds)
+        {
+            if (avatarAnimator == null) yield break;
+            avatarAnimator.SetBool(param, true);
+            yield return new WaitForSeconds(seconds);
+            if (avatarAnimator != null) avatarAnimator.SetBool(param, false);
+        }
+
+        void DriveEmotion()
+        {
+            if (blendshapes == null) return;
+            bool active = emotionFromText && Time.unscaledTime < emotionUntil;
+            float s = active ? emotionStrength : 0f;
+            float speed = 4f * Time.deltaTime;
+            blendshapes.Joy = Mathf.MoveTowards(blendshapes.Joy,
+                (active && (currentEmotion == Emotion.Happy || currentEmotion == Emotion.Love)) ? s : 0f, speed);
+            blendshapes.Fun = Mathf.MoveTowards(blendshapes.Fun,
+                (active && currentEmotion == Emotion.Surprise) ? s : 0f, speed);
+            blendshapes.Sorrow = Mathf.MoveTowards(blendshapes.Sorrow,
+                (active && currentEmotion == Emotion.Sad) ? s * 0.8f : 0f, speed);
+        }
+
         // ---------- 口型 ----------
 
         void DriveLipSync()
@@ -338,8 +467,28 @@ namespace DouyinLive
             var rt = activeBubble.GetRectTransform();
             foreach (var img in rt.GetComponentsInChildren<Image>(true))
             {
+                if (transparentBubble)
+                {
+                    // 透明气泡：隐藏背景图，仅保留文字
+                    img.enabled = false;
+                    continue;
+                }
                 if (bubbleMaterial != null) img.material = bubbleMaterial;
                 img.pixelsPerUnitMultiplier = 0.25f;
+            }
+            // 文字样式：加粗 + 双层描边（外粗内细），直播采集画面里清晰醒目
+            foreach (var txt in rt.GetComponentsInChildren<Text>(true))
+            {
+                if (boldText) txt.fontStyle = FontStyle.Bold;
+                if (transparentBubble && txt.GetComponent<UnityEngine.UI.Outline>() == null)
+                {
+                    var o1 = txt.gameObject.AddComponent<UnityEngine.UI.Outline>();
+                    o1.effectColor = outlineColor;
+                    o1.effectDistance = new Vector2(outlineThickness, -outlineThickness);
+                    var o2 = txt.gameObject.AddComponent<UnityEngine.UI.Outline>();
+                    o2.effectColor = outlineColor;
+                    o2.effectDistance = new Vector2(-outlineThickness, outlineThickness);
+                }
             }
         }
 
@@ -353,7 +502,12 @@ namespace DouyinLive
             if (speakRoutine != null) { StopCoroutine(speakRoutine); speakRoutine = null; }
             if (voiceSource != null && voiceSource.isPlaying) voiceSource.Stop();
             if (avatarAnimator != null) avatarAnimator.SetBool("isTalking", false);
-            if (blendshapes != null) blendshapes.A = 0f;
+            if (blendshapes != null)
+            {
+                blendshapes.A = 0f;
+                blendshapes.Joy = 0f; blendshapes.Fun = 0f; blendshapes.Sorrow = 0f;
+            }
+            emotionUntil = 0f;
             RemoveBubble();
             speaking = false;
         }

@@ -33240,7 +33240,7 @@ Light:
   serializedVersion: 11
   m_Type: 2
   m_Color: {r: 1, g: 0.26999998, b: 0.96203995, a: 1}
-  m_Intensity: 2.7887703e-29
+  m_Intensity: 2.1673254e-29
   m_Range: 0.5
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
@@ -75623,7 +75623,7 @@ Light:
   serializedVersion: 11
   m_Type: 2
   m_Color: {r: 0, g: 0.44799995, b: 1, a: 1}
-  m_Intensity: 5.5775407e-29
+  m_Intensity: 4.3346508e-29
   m_Range: 1
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
@@ -99576,7 +99576,7 @@ Light:
   serializedVersion: 11
   m_Type: 2
   m_Color: {r: 0, g: 0.44799995, b: 1, a: 1}
-  m_Intensity: 4.1831553e-29
+  m_Intensity: 3.250988e-29
   m_Range: 1
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
@@ -253303,6 +253303,33 @@ MonoBehaviour:
     selectedParticleTheme: Standard
     enableFeedSystem: 0
     enableRandomAvatar: 0
+    enableLocomotion: 0
+    enableDouyinLive: 0
+    douyinWsUrl: ws://127.0.0.1:8888
+    douyinWelcomeEnabled: 1
+    douyinAIReplyEnabled: 1
+    douyinLikeReactEnabled: 1
+    douyinGiftEnabled: 1
+    douyinWelcomeCooldown: 8
+    douyinAIReplyMinInterval: 8
+    douyinLikeThreshold: 100
+    douyinLivePrompt: 
+    douyinIdleChatterEnabled: 1
+    douyinIdleThreshold: 90
+    aiBaseUrl: 
+    aiApiKey: 
+    aiModel: 
+    aiFallbackToLocal: 1
+    ttsProvider: 1
+    ttsBaseUrl: 
+    ttsApiKey: 
+    ttsModel: 
+    ttsVoice: 
+    ttsEdgeVoice: zh-CN-XiaoxiaoNeural
+    ttsInstructions: 
+    ttsVolume: 1
+    ttsSpeed: 1
+    lipSyncGain: 1
     alarms: []
     timers: []
 --- !u!1 &6901646575481116606
@@ -255919,7 +255946,7 @@ MonoBehaviour:
     groupID: ambi_lights
     exclusiveTags:
     - lights
-    fadeCurrentValue: 1.3943852e-29
+    fadeCurrentValue: 1.0836627e-29
     fadeTarget: 0
     isFading: 1
     hasYSet: 0
@@ -255943,7 +255970,7 @@ MonoBehaviour:
     groupID: ambi_lights
     exclusiveTags:
     - lights
-    fadeCurrentValue: 1.3943852e-29
+    fadeCurrentValue: 1.0836627e-29
     fadeTarget: 0
     isFading: 1
     hasYSet: 0
@@ -255967,7 +255994,7 @@ MonoBehaviour:
     groupID: ambi_lights
     exclusiveTags:
     - lights
-    fadeCurrentValue: 1.3943852e-29
+    fadeCurrentValue: 1.0836627e-29
     fadeTarget: 0
     isFading: 1
     hasYSet: 0
@@ -262782,6 +262809,9 @@ GameObject:
   - component: {fileID: 8316870361374612500}
   - component: {fileID: 7290369651463270812}
   - component: {fileID: 8536052333486738856}
+  - component: {fileID: 8536052333486738859}
+  - component: {fileID: 8536052333486738858}
+  - component: {fileID: 8536052333486738857}
   m_Layer: 5
   m_Name: Settings
   m_TagString: Untagged
@@ -271296,6 +271326,7 @@ MonoBehaviour:
   enableMinecraftMessagesToggle: {fileID: 1967671819}
   enableFeedSystemToggle: {fileID: 234303502}
   enableRandomAvatarToggle: {fileID: 269300858}
+  enableLocomotionToggle: {fileID: 0}
   bloomObject: {fileID: 147272346}
   dayNightObject: {fileID: 1221425058}
   ambientOcclusionObject: {fileID: 1794725911}
@@ -271341,6 +271372,162 @@ MonoBehaviour:
   checkmarkText: {fileID: 0}
   runKeyName: MateEngine
   commandLineArgs: 
+--- !u!82 &8536052333486738857
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8199926937260908627}
+  m_Enabled: 1
+  serializedVersion: 4
+  OutputAudioMixerGroup: {fileID: 0}
+  m_audioClip: {fileID: 0}
+  m_Resource: {fileID: 0}
+  m_PlayOnAwake: 0
+  m_Volume: 1
+  m_Pitch: 1
+  Loop: 0
+  Mute: 0
+  Spatialize: 0
+  SpatializePostEffects: 0
+  Priority: 128
+  DopplerLevel: 1
+  MinDistance: 1
+  MaxDistance: 500
+  Pan2D: 0
+  rolloffMode: 0
+  BypassEffects: 0
+  BypassListenerEffects: 0
+  BypassReverbZones: 0
+  rolloffCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  panLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  spreadCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  reverbZoneMixCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+--- !u!114 &8536052333486738858
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8199926937260908627}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a673f3e6c68bed54f8850fc97787319f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DouyinLive.DouyinLiveManager
+  debugLog: 0
+  localCharacter: {fileID: 0}
+  blockObjects:
+  - {fileID: 1106372211}
+  - {fileID: 5663312029558268818}
+--- !u!114 &8536052333486738859
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8199926937260908627}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 213efcd967dff6a4f9e352d0fd3e57f7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DouyinLive.SpeechPipeline
+  voiceSource: {fileID: 817462139}
+  volume: 1
+  lipSyncGain: 1
+  lipAttack: 25
+  lipRelease: 8
+  chatContainer: {fileID: 1344334330}
+  transparentBubble: 1
+  followAvatarHead: 1
+  bubbleAnchor: 2
+  headClearance: 0.05
+  sideClearance: 0.18
+  followOffset: {x: 0, y: 0}
+  bubbleSprite: {fileID: 0}
+  bubbleMaterial: {fileID: 0}
+  bubbleColor: {r: 1, g: 0.47058824, b: 0.627451, a: 1}
+  fontColor: {r: 1, g: 0.96, b: 0.75, a: 1}
+  font: {fileID: 0}
+  fontSize: 30
+  bubbleWidth: 360
+  boldText: 1
+  outlineColor: {r: 0.1, g: 0.05, b: 0.15, a: 1}
+  outlineThickness: 2
+  textPadding: 10
+  bubbleSpacing: 10
+  bubbleLinger: 3
+  streamSpeed: 35
+  fallbackLinger: 6
+  emotionFromText: 1
+  emotionStrength: 0.8
+  TTSEnabled: 1
 --- !u!1 &8536327945389812347
 GameObject:
   m_ObjectHideFlags: 0

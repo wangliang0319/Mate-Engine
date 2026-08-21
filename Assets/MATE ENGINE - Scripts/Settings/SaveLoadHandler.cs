@@ -190,6 +190,8 @@ public class SaveLoadHandler : MonoBehaviour
         public float douyinAIReplyMinInterval = 8f;
         public int douyinLikeThreshold = 100;
         public string douyinLivePrompt = "";
+        public bool douyinIdleChatterEnabled = true;
+        public float douyinIdleThreshold = 90f;
 
         // Cloud AI (OpenAI 兼容)
         public string aiBaseUrl = "";
@@ -204,6 +206,7 @@ public class SaveLoadHandler : MonoBehaviour
         public string ttsModel = "";
         public string ttsVoice = "";
         public string ttsEdgeVoice = "zh-CN-XiaoxiaoNeural";
+        public string ttsInstructions = "";
         public float ttsVolume = 1f;
         public float ttsSpeed = 1f;
         public float lipSyncGain = 1f;

@@ -19,6 +19,7 @@ namespace DouyinLive
     public class RewardService
     {
         public SpeechPipeline Speech;
+        public SongService Song;                    // 在线点歌（网易云搜索+跟舞）
         public bool Enabled = true;
         public bool DanmakuRequestEnabled = true;   // 允许弹幕免费点播
         public List<GiftRuleData> Rules = new List<GiftRuleData>();
@@ -44,7 +45,34 @@ namespace DouyinLive
             if (!m.Success) return false;
             if (!Enabled || !DanmakuRequestEnabled) return true; // 是命令但功能关闭，静默吞掉
 
-            HandleRequest(ev.Nickname, m.Groups[2].Value.Trim());
+            string cmd = m.Groups[1].Value;
+            string title = m.Groups[2].Value.Trim();
+            string name = string.IsNullOrEmpty(ev.Nickname) ? "朋友" : ev.Nickname;
+
+            if (cmd == "点歌")
+            {
+                // 优先本地 MMD 舞蹈库：同名舞包是真编舞+原曲音频，效果最好
+                var d = Dance;
+                if (d != null && !string.IsNullOrEmpty(title))
+                {
+                    int idx = d.FindIndexByTitleFuzzy(title);
+                    if (idx >= 0 && d.PlayIndex(idx))
+                    {
+                        Speech?.Enqueue($"好嘞！{name} 点的 {title}，舞蹈版走起！", SpeechPipeline.Priority.GiftThanks, 30f);
+                        return true;
+                    }
+                }
+                // 曲库没有 → 在线搜歌播放 + 跟随跳舞
+                if (Song != null && !string.IsNullOrEmpty(title))
+                    Song.RequestSong(title, name);
+                else if (string.IsNullOrEmpty(title))
+                    Speech?.Enqueue($"{name} 想点什么歌呀？发 点歌加歌名 哦~", SpeechPipeline.Priority.AIReply, 20f);
+                else
+                    HandleRequest(name, title); // SongService 未挂载时退回本地舞蹈库
+                return true;
+            }
+
+            HandleRequest(name, title); // 点舞 → 本地舞蹈库
             return true;
         }
 
@@ -52,34 +80,64 @@ namespace DouyinLive
         {
             if (!Enabled || ev.Type != DouyinMsgType.Gift) return;
             string name = string.IsNullOrEmpty(ev.Nickname) ? "朋友" : ev.Nickname;
-            string thanks = $"谢谢 {name} 送的 {ev.GiftName}";
-            if (ev.GiftCount > 1) thanks += $" 乘 {ev.GiftCount}";
-            thanks += "！";
+            int totalValue = Mathf.Max(1, ev.DiamondCount) * Mathf.Max(1, ev.GiftCount);
 
+            // 按总价值分三档庆祝，越贵越隆重（吸引送礼的核心展示）
+            if (totalValue >= 100)
+                CelebrateBig(name, ev);
+            else if (totalValue >= 10)
+                CelebrateMedium(name, ev);
+            else
+                CelebrateSmall(name, ev);
+
+            // 礼物规则仍可触发额外动作（指定舞等）
             var rule = MatchRule(ev);
-            if (rule == null || rule.action == "thanks" || string.IsNullOrEmpty(rule.action))
-            {
-                Speech?.Enqueue(thanks, SpeechPipeline.Priority.GiftThanks, 60f);
-                return;
-            }
-
-            if (rule.action == "randomDance")
-            {
-                Speech?.Enqueue(thanks + "为你跳一支舞~", SpeechPipeline.Priority.GiftThanks, 60f);
-                PlayRandomDance();
-            }
-            else if (rule.action == "builtinDance")
-            {
-                Speech?.Enqueue(thanks + "开始跳舞咯~", SpeechPipeline.Priority.GiftThanks, 60f);
-                PlayBuiltinDance();
-            }
-            else if (rule.action.StartsWith("dance:"))
-            {
-                string target = rule.action.Substring(6).Trim();
-                Speech?.Enqueue(thanks, SpeechPipeline.Priority.GiftThanks, 60f);
-                PlayNamedDance(target, name);
-            }
+            if (rule != null && rule.action.StartsWith("dance:"))
+                PlayNamedDance(rule.action.Substring(6).Trim(), name);
         }
+
+        // 小礼物（<10抖币）：甜甜的致谢
+        void CelebrateSmall(string name, DouyinEvent ev)
+        {
+            string[] lines = {
+                "谢谢 {u} 送的 {g}，么么哒！",
+                "收到 {u} 的 {g} 啦，谢谢宝贝！",
+                "哇，{u} 送我 {g}，开心，爱你哟！",
+            };
+            Speech?.Enqueue(Fill(Pick(lines), name, ev), SpeechPipeline.Priority.GiftThanks, 60f);
+        }
+
+        // 中礼物（10~99抖币）：热情致谢 + 数量播报
+        void CelebrateMedium(string name, DouyinEvent ev)
+        {
+            string[] lines = {
+                "哇塞！谢谢 {u} 的 {g}，你也太好了吧，抱抱你！",
+                "天呐，{u} 送了 {g}！大哥大气，爱你爱你！",
+                "感谢 {u} 的 {g}！今天最喜欢你啦！",
+            };
+            Speech?.Enqueue(Fill(Pick(lines), name, ev), SpeechPipeline.Priority.GiftThanks, 60f);
+        }
+
+        // 大礼物（≥100抖币）：欢呼 + 自动跳一支舞庆祝
+        void CelebrateBig(string name, DouyinEvent ev)
+        {
+            string[] lines = {
+                "哇！！{u} 送出了超级大礼 {g}！！全体起立！谢谢老板，老板大气！为你跳一支舞！",
+                "天呐天呐！感谢 {u} 的 {g}！这是今天最开心的时刻！这支舞献给你！",
+                "呜哇，{u} 太壕了！{g} 收到！比心比心，看我为你跳舞！",
+            };
+            Speech?.Enqueue(Fill(Pick(lines), name, ev), SpeechPipeline.Priority.GiftThanks, 90f);
+            PlayRandomDance();
+        }
+
+        static string Fill(string tpl, string name, DouyinEvent ev)
+        {
+            string gift = ev.GiftName;
+            if (ev.GiftCount > 1) gift += " 乘 " + ev.GiftCount;
+            return tpl.Replace("{u}", name).Replace("{g}", gift);
+        }
+
+        string Pick(string[] arr) => arr[rng.Next(arr.Length)];
 
         GiftRuleData MatchRule(DouyinEvent ev)
         {

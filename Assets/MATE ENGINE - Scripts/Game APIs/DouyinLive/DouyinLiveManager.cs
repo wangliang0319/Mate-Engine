@@ -25,11 +25,13 @@ namespace DouyinLive
 
         SpeechPipeline speech;
         DouyinLiveClient client;
+        SongService songService;
 
         readonly WelcomeService welcome = new WelcomeService();
         readonly LikeService like = new LikeService();
         readonly RewardService reward = new RewardService();
         readonly DanmakuAIService danmakuAI = new DanmakuAIService();
+        readonly IdleChatterService idleChatter = new IdleChatterService();
 
         CloudChatBackend cloudBackend;
         LocalChatBackend localBackend;
@@ -77,6 +79,9 @@ namespace DouyinLive
             if (!string.IsNullOrWhiteSpace(d.ttsModel)) cloudTTS.Model = d.ttsModel;
             if (!string.IsNullOrWhiteSpace(d.ttsVoice)) cloudTTS.Voice = d.ttsVoice;
             cloudTTS.Speed = d.ttsSpeed;
+            cloudTTS.Instructions = string.IsNullOrWhiteSpace(d.ttsInstructions)
+                ? "你是中国的甜美女主播，说地道的标准普通话，语气活泼亲切自然，绝对不要有外国口音"
+                : d.ttsInstructions;
 
             edgeTTS ??= new EdgeTTSProvider();
             if (!string.IsNullOrWhiteSpace(d.ttsEdgeVoice)) edgeTTS.Voice = d.ttsEdgeVoice;
@@ -99,6 +104,16 @@ namespace DouyinLive
             reward.Speech = speech;
             reward.Enabled = d.douyinGiftEnabled;
             reward.Rules = LoadGiftRules();
+            if (songService == null)
+            {
+                songService = GetComponent<SongService>();
+                if (songService == null) songService = gameObject.AddComponent<SongService>();
+            }
+            songService.Speech = speech;
+            reward.Song = songService;
+
+            if (GetComponent<CaptureModeController>() == null)
+                gameObject.AddComponent<CaptureModeController>();
 
             danmakuAI.Speech = speech;
             danmakuAI.Enabled = d.douyinAIReplyEnabled;
@@ -107,6 +122,11 @@ namespace DouyinLive
             danmakuAI.Cloud = cloudBackend;
             danmakuAI.Local = localBackend;
             danmakuAI.FallbackToLocal = d.aiFallbackToLocal;
+
+            idleChatter.Speech = speech;
+            idleChatter.AI = danmakuAI;
+            idleChatter.Enabled = d.douyinIdleChatterEnabled;
+            idleChatter.IdleThreshold = d.douyinIdleThreshold;
 
             // 连接
             bool shouldRun = d.enableDouyinLive;
@@ -127,6 +147,7 @@ namespace DouyinLive
             welcome.ResetSession();
             like.ResetSession();
             danmakuAI.ResetSession();
+            idleChatter.ResetSession();
             if (debugLog) Debug.Log("[DouyinLive] Started, connecting " + url);
         }
 
@@ -155,12 +176,14 @@ namespace DouyinLive
             {
                 welcome.Tick();
                 danmakuAI.Tick();
+                idleChatter.Tick();
             }
         }
 
         void Route(DouyinEvent ev)
         {
             if (debugLog) Debug.Log($"[DouyinLive] {ev.Type} {ev.Nickname}: {ev.Content}{ev.GiftName}");
+            idleChatter.NotifyInteraction();   // 任何观众事件都重置冷场计时
             switch (ev.Type)
             {
                 case DouyinMsgType.Chat:
