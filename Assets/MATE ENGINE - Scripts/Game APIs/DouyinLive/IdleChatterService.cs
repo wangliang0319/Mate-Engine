@@ -25,6 +25,7 @@ namespace DouyinLive
         float lastInteractionAt;
         float lastChatterAt;
         float lastAutoSongAt;
+        bool autoSongClockStarted;   // 首唱只受冷场阈值限制，MinInterval 从第一首后才生效
         float nextIntervalJitter;
         int lastCategory = -1;
         readonly System.Random rng = new System.Random();
@@ -69,13 +70,15 @@ namespace DouyinLive
 
             float idleFor = now - lastInteractionAt;
 
-            // 深度冷场：自动唱一首（歌本身会带跳舞）；歌单为空则跳过
+            // 深度冷场：自动唱一首（歌本身会带跳舞）；歌单为空则跳过。
+            // 首唱只看冷场时长；MinInterval 从唱过第一首之后才计。
             if (AutoSongEnabled && Song != null && !Song.IsPlaying &&
                 SongList != null && SongList.Count > 0 &&
                 idleFor >= AutoSongIdleThreshold &&
-                now - lastAutoSongAt >= AutoSongMinInterval &&
+                (!autoSongClockStarted || now - lastAutoSongAt >= AutoSongMinInterval) &&
                 !Speech.IsSpeaking && Speech.QueueCount == 0)
             {
+                autoSongClockStarted = true;
                 lastAutoSongAt = now;
                 lastChatterAt = now;   // 唱歌也算一次暖场，避免紧跟着说话
                 string pick = SongList[rng.Next(SongList.Count)];
@@ -111,6 +114,7 @@ namespace DouyinLive
             lastInteractionAt = Time.unscaledTime;
             lastChatterAt = Time.unscaledTime;
             lastAutoSongAt = Time.unscaledTime;
+            autoSongClockStarted = false;
             lastCategory = -1;
             RollJitter();
         }
