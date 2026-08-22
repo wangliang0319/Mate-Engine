@@ -16,10 +16,10 @@ namespace DouyinLive
         float lastSpokenAt = -999f;
 
         static readonly string[] EnterTemplates = {
-            "欢迎 {user}，祝你天天开心~",
-            "欢迎 {user}，愿你每天都有好心情~",
-            "欢迎 {user}，祝你万事顺意，天天开心！",
-            "欢迎 {user}，希望今天有开心的事情发生在你身上~"
+            "{user}，欢迎光临，祝你天天开心~",
+            "欢迎光临，{user}，愿你今天好运连连~",
+            "{user}，欢迎光临，祝你万事顺意~",
+            "欢迎光临，{user}，祝你心想事成~"
         };
         static readonly string[] FollowTemplates = {
             "谢谢 {user} 的关注，爱你哟~", "{user} 关注了我，太感动了！", "感谢 {user} 的关注，抱抱~"

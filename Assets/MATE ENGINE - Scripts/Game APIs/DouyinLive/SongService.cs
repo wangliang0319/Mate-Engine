@@ -49,12 +49,14 @@ namespace DouyinLive
 
         // ---------- 入口 ----------
 
+        // userName 传 null/空 = 自动唱歌（冷场），不播报任何点歌提示
         public void RequestSong(string keyword, string userName)
         {
             if (string.IsNullOrWhiteSpace(keyword)) return;
             if (playRoutine != null)
             {
-                Speech?.Enqueue($"正在播放 {nowPlaying}，稍后再点哦~", SpeechPipeline.Priority.AIReply, 20f);
+                if (!string.IsNullOrEmpty(userName))
+                    Speech?.Enqueue($"正在播放 {nowPlaying}，稍后再点哦~", SpeechPipeline.Priority.AIReply, 20f);
                 return;
             }
             playRoutine = StartCoroutine(SearchAndPlay(keyword.Trim(), userName));
@@ -73,7 +75,10 @@ namespace DouyinLive
 
         IEnumerator SearchAndPlay(string keyword, string userName)
         {
-            Speech?.Enqueue($"收到 {userName} 点的 {keyword}，我找找哈~", SpeechPipeline.Priority.GiftThanks, 30f);
+            bool isAuto = string.IsNullOrEmpty(userName);
+            // 观众点歌只简短确认一句；找到后直接开唱不再报幕
+            if (!isAuto)
+                Speech?.Enqueue($"收到 {userName} 点的 {keyword}~", SpeechPipeline.Priority.GiftThanks, 30f);
 
             // 1) 搜索 + 探测可播放版本（后台线程）
             var findTask = FindPlayableSong(keyword);
@@ -82,8 +87,9 @@ namespace DouyinLive
             var song = findTask.Status == TaskStatus.RanToCompletion ? findTask.Result : null;
             if (song == null)
             {
-                Speech?.Enqueue($"呜呜，{keyword} 这首歌找不到能播的版本，换一首试试嘛~",
-                    SpeechPipeline.Priority.AIReply, 30f);
+                if (!isAuto)
+                    Speech?.Enqueue($"呜呜，{keyword} 这首歌找不到能播的版本，换一首试试嘛~",
+                        SpeechPipeline.Priority.AIReply, 30f);
                 playRoutine = null;
                 yield break;
             }
@@ -95,7 +101,8 @@ namespace DouyinLive
             var pcm = decodeTask.Status == TaskStatus.RanToCompletion ? decodeTask.Result : null;
             if (pcm == null || !pcm.IsValid)
             {
-                Speech?.Enqueue("这首歌下载失败了，再点一次或换一首吧~", SpeechPipeline.Priority.AIReply, 30f);
+                if (!isAuto)
+                    Speech?.Enqueue("这首歌下载失败了，再点一次或换一首吧~", SpeechPipeline.Priority.AIReply, 30f);
                 playRoutine = null;
                 yield break;
             }
@@ -106,14 +113,13 @@ namespace DouyinLive
                 pcm = ExtractChorus(pcm, chorusSeconds);
             }
 
-            // 3) 播放 + 跳舞
+            // 3) 播放 + 跳舞（找到即唱，无报幕）
             var clip = AudioClip.Create("song", pcm.Samples.Length / pcm.Channels, pcm.Channels, pcm.SampleRate, false);
             clip.SetData(pcm.Samples, 0);
 
             nowPlaying = $"{song.Name} - {song.Artist}";
-            Speech?.Enqueue($"找到啦！{nowPlaying}，一起摇起来~", SpeechPipeline.Priority.GiftThanks, 30f);
 
-            // 等报幕说完再起歌，避免和语音撞车
+            // 等前面的确认/暖场语说完再起歌，避免和语音撞车
             float wait = 0f;
             while (Speech != null && Speech.IsSpeaking && wait < 8f) { wait += Time.deltaTime; yield return null; }
 

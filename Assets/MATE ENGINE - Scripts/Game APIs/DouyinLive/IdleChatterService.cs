@@ -83,7 +83,7 @@ namespace DouyinLive
                 lastChatterAt = now;   // 唱歌也算一次暖场，避免紧跟着说话
                 string pick = SongList[rng.Next(SongList.Count)];
                 Speech.Enqueue($"好像有点安静呢，那我来给大家唱一首 {pick} 吧~", SpeechPipeline.Priority.LikeThanks, 30f);
-                Song.RequestSong(pick, "我自己");
+                Song.RequestSong(pick, null);   // null = 自动唱歌，SongService 不再播报点歌提示
                 return;
             }
 
