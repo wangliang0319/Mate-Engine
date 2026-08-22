@@ -194,7 +194,12 @@ public class SaveLoadHandler : MonoBehaviour
         public float douyinIdleThreshold = 90f;
         public bool douyinIdleAutoSongEnabled = true;
         public float douyinIdleAutoSongThreshold = 300f;
-        public List<string> douyinIdleSongList = new();
+        public List<string> douyinIdleSongList = new()
+        {
+            "赤伶", "游山恋", "探窗", "辞九门回忆", "半生雪", "踏山河",
+            "燕无歇", "牵丝戏", "红昭愿", "芒种", "不谓侠", "琵琶行",
+            "大鱼", "典狱司", "精卫", "画离弦", "殊途", "山外小楼夜听雨"
+        };
 
         // Cloud AI (OpenAI 兼容)
         public string aiBaseUrl = "";

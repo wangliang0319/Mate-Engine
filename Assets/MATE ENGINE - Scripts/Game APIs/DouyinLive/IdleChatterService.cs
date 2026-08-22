@@ -16,17 +16,11 @@ namespace DouyinLive
         public float MinInterval = 60f;      // 两次暖场最小间隔
         public float MaxInterval = 150f;     // 实际间隔在 Min~Max 随机
 
-        // 冷场自动唱歌：冷场持续更久后随机来一首（默认古风热歌，settings 可自定义）
+        // 冷场自动唱歌：冷场持续更久后从歌单随机来一首（歌单在 settings.json 配置）
         public bool AutoSongEnabled = true;
         public float AutoSongIdleThreshold = 300f;   // 冷场超5分钟自动唱
         public float AutoSongMinInterval = 600f;     // 两首自动歌最少隔10分钟
         public List<string> SongList = new List<string>();
-
-        public static readonly string[] DefaultGufengSongs = {
-            "赤伶", "游山恋", "探窗", "辞九门回忆", "半生雪", "踏山河",
-            "燕无歇", "牵丝戏", "红昭愿", "芒种", "不谓侠", "琵琶行",
-            "大鱼", "典狱司", "精卫", "画离弦", "殊途", "山外小楼夜听雨"
-        };
 
         float lastInteractionAt;
         float lastChatterAt;
@@ -75,16 +69,16 @@ namespace DouyinLive
 
             float idleFor = now - lastInteractionAt;
 
-            // 深度冷场：自动唱一首（歌本身会带跳舞）
+            // 深度冷场：自动唱一首（歌本身会带跳舞）；歌单为空则跳过
             if (AutoSongEnabled && Song != null && !Song.IsPlaying &&
+                SongList != null && SongList.Count > 0 &&
                 idleFor >= AutoSongIdleThreshold &&
                 now - lastAutoSongAt >= AutoSongMinInterval &&
                 !Speech.IsSpeaking && Speech.QueueCount == 0)
             {
                 lastAutoSongAt = now;
                 lastChatterAt = now;   // 唱歌也算一次暖场，避免紧跟着说话
-                var list = SongList != null && SongList.Count > 0 ? SongList : new List<string>(DefaultGufengSongs);
-                string pick = list[rng.Next(list.Count)];
+                string pick = SongList[rng.Next(SongList.Count)];
                 Speech.Enqueue($"好像有点安静呢，那我来给大家唱一首 {pick} 吧~", SpeechPipeline.Priority.LikeThanks, 30f);
                 Song.RequestSong(pick, "我自己");
                 return;

@@ -67,7 +67,7 @@
 "douyinIdleThreshold": 90.0,         // 冷场判定秒数
 "douyinIdleAutoSongEnabled": true,   // 冷场自动唱歌
 "douyinIdleAutoSongThreshold": 300.0,// 冷场多少秒后自动唱
-"douyinIdleSongList": [],            // 自动唱歌歌单；空=内置古风热歌榜(赤伶/游山恋/探窗等18首)
+"douyinIdleSongList": ["赤伶", "..."],  // 自动唱歌歌单(默认18首古风热歌，直接在此增删)；空=不自动唱
 "douyinWelcomeCooldown": 8.0, "douyinAIReplyMinInterval": 8.0,
 "douyinLikeThreshold": 100,
 "douyinLivePrompt": "",              // 追加人设

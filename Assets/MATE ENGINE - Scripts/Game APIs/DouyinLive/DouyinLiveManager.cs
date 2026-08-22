@@ -127,9 +127,7 @@ namespace DouyinLive
             idleChatter.IdleThreshold = d.douyinIdleThreshold;
             idleChatter.AutoSongEnabled = d.douyinIdleAutoSongEnabled;
             idleChatter.AutoSongIdleThreshold = d.douyinIdleAutoSongThreshold;
-            idleChatter.SongList = d.douyinIdleSongList != null && d.douyinIdleSongList.Count > 0
-                ? d.douyinIdleSongList
-                : new List<string>(IdleChatterService.DefaultGufengSongs);
+            idleChatter.SongList = d.douyinIdleSongList ?? new List<string>();
 
             // 连接
             bool shouldRun = d.enableDouyinLive;
