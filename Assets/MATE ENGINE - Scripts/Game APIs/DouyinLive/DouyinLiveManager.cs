@@ -112,9 +112,6 @@ namespace DouyinLive
             songService.Speech = speech;
             reward.Song = songService;
 
-            if (GetComponent<CaptureModeController>() == null)
-                gameObject.AddComponent<CaptureModeController>();
-
             danmakuAI.Speech = speech;
             danmakuAI.Enabled = d.douyinAIReplyEnabled;
             danmakuAI.MinInterval = d.douyinAIReplyMinInterval;
@@ -125,8 +122,14 @@ namespace DouyinLive
 
             idleChatter.Speech = speech;
             idleChatter.AI = danmakuAI;
+            idleChatter.Song = songService;
             idleChatter.Enabled = d.douyinIdleChatterEnabled;
             idleChatter.IdleThreshold = d.douyinIdleThreshold;
+            idleChatter.AutoSongEnabled = d.douyinIdleAutoSongEnabled;
+            idleChatter.AutoSongIdleThreshold = d.douyinIdleAutoSongThreshold;
+            idleChatter.SongList = d.douyinIdleSongList != null && d.douyinIdleSongList.Count > 0
+                ? d.douyinIdleSongList
+                : new List<string>(IdleChatterService.DefaultGufengSongs);
 
             // 连接
             bool shouldRun = d.enableDouyinLive;

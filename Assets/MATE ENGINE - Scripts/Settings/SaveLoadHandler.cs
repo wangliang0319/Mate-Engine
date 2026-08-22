@@ -192,6 +192,9 @@ public class SaveLoadHandler : MonoBehaviour
         public string douyinLivePrompt = "";
         public bool douyinIdleChatterEnabled = true;
         public float douyinIdleThreshold = 90f;
+        public bool douyinIdleAutoSongEnabled = true;
+        public float douyinIdleAutoSongThreshold = 300f;
+        public List<string> douyinIdleSongList = new();
 
         // Cloud AI (OpenAI 兼容)
         public string aiBaseUrl = "";

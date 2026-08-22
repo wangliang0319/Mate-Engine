@@ -5,18 +5,32 @@ using UnityEngine;
 namespace DouyinLive
 {
     // 冷场暖场：直播间一段时间无互动时，主动说话活跃气氛
-    // （求点赞/求关注/闲聊/才艺预告轮换，避免复读机感）。
+    // （求点赞/求关注/闲聊/才艺预告轮换）；长时间冷场则自动唱歌跳舞。
     public class IdleChatterService
     {
         public SpeechPipeline Speech;
         public DanmakuAIService AI;          // 可用时让大模型生成暖场词，更自然
+        public SongService Song;             // 冷场自动唱歌
         public bool Enabled = true;
         public float IdleThreshold = 90f;    // 无互动多少秒算冷场
         public float MinInterval = 60f;      // 两次暖场最小间隔
         public float MaxInterval = 150f;     // 实际间隔在 Min~Max 随机
 
+        // 冷场自动唱歌：冷场持续更久后随机来一首（默认古风热歌，settings 可自定义）
+        public bool AutoSongEnabled = true;
+        public float AutoSongIdleThreshold = 300f;   // 冷场超5分钟自动唱
+        public float AutoSongMinInterval = 600f;     // 两首自动歌最少隔10分钟
+        public List<string> SongList = new List<string>();
+
+        public static readonly string[] DefaultGufengSongs = {
+            "赤伶", "游山恋", "探窗", "辞九门回忆", "半生雪", "踏山河",
+            "燕无歇", "牵丝戏", "红昭愿", "芒种", "不谓侠", "琵琶行",
+            "大鱼", "典狱司", "精卫", "画离弦", "殊途", "山外小楼夜听雨"
+        };
+
         float lastInteractionAt;
         float lastChatterAt;
+        float lastAutoSongAt;
         float nextIntervalJitter;
         int lastCategory = -1;
         readonly System.Random rng = new System.Random();
@@ -57,11 +71,30 @@ namespace DouyinLive
             float now = Time.unscaledTime;
             if (lastInteractionAt <= 0f) lastInteractionAt = now;
             if (lastChatterAt <= 0f) { lastChatterAt = now; RollJitter(); }
+            if (lastAutoSongAt <= 0f) lastAutoSongAt = now;
 
-            // 没冷场 / 正在说话 / 队列有内容时不插嘴
-            if (now - lastInteractionAt < IdleThreshold) return;
+            float idleFor = now - lastInteractionAt;
+
+            // 深度冷场：自动唱一首（歌本身会带跳舞）
+            if (AutoSongEnabled && Song != null && !Song.IsPlaying &&
+                idleFor >= AutoSongIdleThreshold &&
+                now - lastAutoSongAt >= AutoSongMinInterval &&
+                !Speech.IsSpeaking && Speech.QueueCount == 0)
+            {
+                lastAutoSongAt = now;
+                lastChatterAt = now;   // 唱歌也算一次暖场，避免紧跟着说话
+                var list = SongList != null && SongList.Count > 0 ? SongList : new List<string>(DefaultGufengSongs);
+                string pick = list[rng.Next(list.Count)];
+                Speech.Enqueue($"好像有点安静呢，那我来给大家唱一首 {pick} 吧~", SpeechPipeline.Priority.LikeThanks, 30f);
+                Song.RequestSong(pick, "我自己");
+                return;
+            }
+
+            // 普通冷场：说暖场话
+            if (idleFor < IdleThreshold) return;
             if (now - lastChatterAt < MinInterval + nextIntervalJitter) return;
             if (Speech.IsSpeaking || Speech.QueueCount > 0) return;
+            if (Song != null && Song.IsPlaying) return;   // 唱歌中不插嘴
 
             lastChatterAt = now;
             RollJitter();
@@ -83,6 +116,7 @@ namespace DouyinLive
         {
             lastInteractionAt = Time.unscaledTime;
             lastChatterAt = Time.unscaledTime;
+            lastAutoSongAt = Time.unscaledTime;
             lastCategory = -1;
             RollJitter();
         }

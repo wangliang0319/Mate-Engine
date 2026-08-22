@@ -15,8 +15,8 @@
 | 点歌 | 弹幕 `点歌 <歌名>` | 优先本地 MMD 舞包；否则网易云搜歌→高潮段→原生跟舞 |
 | 点舞 | 弹幕 `点舞 [舞名]` | 本地 MMD 舞蹈库（模糊匹配，无名=随机） |
 | 冷场暖场 | 90 秒无互动 | 自动求赞/求关注/才艺引导/闲聊，四类轮换 |
+| 冷场自动唱歌 | 冷场超 5 分钟 | 从歌单随机唱一首+跳舞（默认内置古风热歌榜，可自定义） |
 | 情绪动作 | 说话内容关键词 | 谢谢/抱抱→开心表情+互动动画；难过/惊喜同理 |
-| 直播采集模式 | 快捷键 F9 | 窗口变实体+绿幕，供直播伴侣窗口采集；F10 循环尺寸 |
 
 ## 场景接线（Unity Editor 内一次性完成）
 
@@ -39,16 +39,6 @@
 | Font Color / Outline Color | 暖黄白 / 深紫黑 | 直播字幕经典配色，自动加粗 |
 | Emotion From Text | 开 | 说话内容驱动表情/互动动画 |
 | Lip Sync Gain | 1 | 口型幅度 |
-
-### CaptureModeController（直播采集，自动挂载）
-
-- **F9**：切换采集模式。透明桌宠 ⇆ 标准实体窗口+绿幕（Win32 强制清除
-  WS_EX_TOOLWINDOW/LAYERED 等隐身样式，直播伴侣【窗口】采集必然可见）。
-- **F10**：循环窗口尺寸预设（1280×720 / 1920×1080 / 720×1280 / 800×800，
-  Inspector 可改）；也可直接拖窗口边缘调整。
-- 直播伴侣中对该窗口源添加【色度键】滤镜（绿色）抠出透明桌宠；
-  角色带绿色部件时勾 `Use Blue` 换蓝幕。
-- 退出采集模式自动还原窗口位置/大小/透明/置顶/穿透。
 
 ### SongService 关键参数
 
@@ -75,6 +65,9 @@
 "douyinLikeReactEnabled": true, "douyinGiftEnabled": true,
 "douyinIdleChatterEnabled": true,    // 冷场暖场
 "douyinIdleThreshold": 90.0,         // 冷场判定秒数
+"douyinIdleAutoSongEnabled": true,   // 冷场自动唱歌
+"douyinIdleAutoSongThreshold": 300.0,// 冷场多少秒后自动唱
+"douyinIdleSongList": [],            // 自动唱歌歌单；空=内置古风热歌榜(赤伶/游山恋/探窗等18首)
 "douyinWelcomeCooldown": 8.0, "douyinAIReplyMinInterval": 8.0,
 "douyinLikeThreshold": 100,
 "douyinLivePrompt": "",              // 追加人设
