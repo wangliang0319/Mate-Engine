@@ -16,14 +16,14 @@ namespace DouyinLive
         float lastSpokenAt = -999f;
 
         static readonly string[] EnterTemplates = {
-            "{user}，欢迎光临，万事胜意~",
-            "欢迎光临，{user}，喜乐长安~",
-            "{user}，欢迎光临，前程似锦~",
-            "欢迎光临，{user}，岁岁欢愉~",
-            "{user}，欢迎光临，好运常伴~",
-            "欢迎光临，{user}，平安喜乐~",
-            "{user}，欢迎光临，得偿所愿~",
-            "欢迎光临，{user}，繁花似锦~"
+            "欢迎 {user} 来到直播间，快来一起玩呀~",
+            "{user} 来啦，欢迎欢迎，坐下聊会儿呗~",
+            "哇，{user} 来了，今天有你真好~",
+            "欢迎 {user}~ 来得正好，别走开哦~",
+            "{user} 进来啦，喜欢的话点个关注呀~",
+            "欢迎 {user}，一起聊聊天呀，弹幕走起~",
+            "{user} 来啦？想听什么歌可以直接点哦~",
+            "欢迎 {user} 光临，宝子来得早不如来得巧~"
         };
         static readonly string[] FollowTemplates = {
             "谢谢 {user} 的关注，爱你哟~", "{user} 关注了我，太感动了！", "感谢 {user} 的关注，抱抱~"
