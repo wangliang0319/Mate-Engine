@@ -91,44 +91,70 @@ namespace DouyinLive
     }
 
     // 点赞聚合 → 阈值/里程碑致谢（P4/P2）
+    // 点赞：有赞就谢（带冷却，冷却内的赞合并到下一次致谢）+ 里程碑欢呼
     public class LikeService
     {
         public SpeechPipeline Speech;
         public bool Enabled = true;
-        public int Threshold = 100;
+        public int Threshold = 100;          // 保留字段：兼容旧配置，现用作大额播报分界
+        public float ThankCooldown = 15f;    // 两次点赞致谢最小间隔（秒）
 
         long sessionTotal;
-        long lastThankedAt;
+        long lastThankedTotal;
+        float lastThankedTime = -999f;
+        string lastLikerName = "";
         static readonly long[] Milestones = { 1000, 5000, 10000, 50000, 100000 };
         int nextMilestone;
+        readonly System.Random rng = new System.Random();
 
         public long SessionTotal => sessionTotal;
+
+        static readonly string[] SmallThanks = {
+            "收到 {user} 的赞啦，谢谢你~",
+            "谢谢 {user} 点的赞，爱你哟~",
+            "{user} 给我点赞了，开心~",
+            "谢谢 {user} 的小红心，比心~"
+        };
 
         public void OnEvent(DouyinEvent ev)
         {
             if (ev.Type != DouyinMsgType.Like) return;
             sessionTotal += ev.LikeCount;
+            if (!string.IsNullOrEmpty(ev.Nickname)) lastLikerName = ev.Nickname;
             if (!Enabled || Speech == null) return;
 
+            // 里程碑欢呼（无冷却，优先）
             if (nextMilestone < Milestones.Length && sessionTotal >= Milestones[nextMilestone])
             {
                 Speech.Enqueue($"哇！点赞突破 {Milestones[nextMilestone]} 了，谢谢大家，爱你们！",
                     SpeechPipeline.Priority.Milestone, 60f);
                 nextMilestone++;
-                lastThankedAt = sessionTotal;
+                lastThankedTotal = sessionTotal;
+                lastThankedTime = Time.unscaledTime;
                 return;
             }
 
-            if (sessionTotal - lastThankedAt >= Threshold)
-            {
-                lastThankedAt = sessionTotal;
-                Speech.Enqueue($"谢谢大家的 {sessionTotal} 个赞~", SpeechPipeline.Priority.LikeThanks, 20f);
-            }
+            // 有赞就谢：冷却期内不重复，冷却结束后把这段时间的赞合并致谢
+            if (Time.unscaledTime - lastThankedTime < ThankCooldown) return;
+
+            long delta = sessionTotal - lastThankedTotal;
+            if (delta <= 0) return;
+            lastThankedTotal = sessionTotal;
+            lastThankedTime = Time.unscaledTime;
+
+            string name = string.IsNullOrEmpty(lastLikerName) ? "宝子" : lastLikerName;
+            if (delta < Threshold)
+                Speech.Enqueue(SmallThanks[rng.Next(SmallThanks.Length)].Replace("{user}", name),
+                    SpeechPipeline.Priority.LikeThanks, 20f);
+            else
+                Speech.Enqueue($"哇，一下子收到 {delta} 个赞，谢谢大家，爱你们~",
+                    SpeechPipeline.Priority.LikeThanks, 20f);
         }
 
         public void ResetSession()
         {
-            sessionTotal = 0; lastThankedAt = 0; nextMilestone = 0;
+            sessionTotal = 0; lastThankedTotal = 0; nextMilestone = 0;
+            lastThankedTime = -999f; lastLikerName = "";
         }
     }
 }
