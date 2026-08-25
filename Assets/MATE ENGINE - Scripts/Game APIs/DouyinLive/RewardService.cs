@@ -122,6 +122,8 @@ namespace DouyinLive
             lastSwitchAt = Time.unscaledTime;
             string pick = candidates[rng.Next(candidates.Count)];
             Speech?.Enqueue($"{userName} 想看新角色是吧？看我变身！", SpeechPipeline.Priority.GiftThanks, 20f);
+            // 先记录当前角色高度基准，新模型加载完成后自动缩放到相同显示高度
+            DouyinLiveManager.Instance?.NormalizeNextAvatarHeight();
             if (string.IsNullOrEmpty(pick)) vrmLoader.ActivateDefaultModel();
             else vrmLoader.LoadVRM(pick);
         }

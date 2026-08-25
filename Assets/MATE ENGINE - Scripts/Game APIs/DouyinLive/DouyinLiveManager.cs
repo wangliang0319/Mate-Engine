@@ -268,6 +268,61 @@ namespace DouyinLive
             client?.Stop();
         }
 
+        // ---------- 换角色后身高归一化：新模型缩放到与上一个角色相同的显示高度 ----------
+
+        // 必须在触发 LoadVRM 之前调用（先记录当前角色的高度基准）
+        public void NormalizeNextAvatarHeight()
+        {
+            StartCoroutine(NormalizeAvatarRoutine());
+        }
+
+        System.Collections.IEnumerator NormalizeAvatarRoutine()
+        {
+            var loader = FindFirstObjectByType<VRMLoader>();
+            if (loader == null) yield break;
+
+            var prev = loader.GetCurrentModel();
+            float prevHeight = MeasureWorldHeight(prev);
+            if (prevHeight <= 0.05f) yield break;   // 没有可靠基准就不干预
+
+            // 等新模型实例出现（异步加载，最长等30秒）
+            GameObject cur = prev;
+            float t = 0f;
+            while (t < 30f)
+            {
+                cur = loader.GetCurrentModel();
+                if (cur != null && cur != prev && cur.activeInHierarchy) break;
+                t += Time.deltaTime;
+                yield return null;
+            }
+            if (cur == null || cur == prev) yield break;
+
+            yield return new WaitForSeconds(0.5f);  // 等模型初始化/全局缩放设置生效
+
+            float newHeight = MeasureWorldHeight(cur);
+            if (newHeight <= 0.05f) yield break;
+            float factor = Mathf.Clamp(prevHeight / newHeight, 0.2f, 5f);
+            if (Mathf.Abs(factor - 1f) < 0.05f) yield break;   // 差异5%以内不折腾
+
+            cur.transform.localScale *= factor;
+            Debug.Log($"[DouyinLive] 换角色身高归一化: {newHeight:F2}m -> {prevHeight:F2}m (缩放 x{factor:F2})");
+        }
+
+        static float MeasureWorldHeight(GameObject go)
+        {
+            if (go == null) return 0f;
+            var renderers = go.GetComponentsInChildren<Renderer>(false);
+            bool has = false;
+            Bounds b = default;
+            foreach (var r in renderers)
+            {
+                if (r is ParticleSystemRenderer) continue;
+                if (!has) { b = r.bounds; has = true; }
+                else b.Encapsulate(r.bounds);
+            }
+            return has ? b.size.y : 0f;
+        }
+
         // ---------- 礼物规则文件 ----------
 
         static string GiftRulesPath => Path.Combine(Application.persistentDataPath, "douyin_gift_rules.json");
