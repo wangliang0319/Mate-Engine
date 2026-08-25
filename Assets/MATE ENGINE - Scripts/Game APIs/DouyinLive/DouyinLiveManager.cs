@@ -129,6 +129,13 @@ namespace DouyinLive
             idleChatter.AutoSongIdleThreshold = d.douyinIdleAutoSongThreshold;
             idleChatter.SongList = d.douyinIdleSongList ?? new List<string>();
 
+            // 直播期间大头模式保持窗口尺寸不变（窗口突变会导致直播伴侣采集画面裁切错乱）
+            if (d.enableDouyinLive)
+            {
+                var bigScreen = FindFirstObjectByType<AvatarBigScreenHandler>();
+                if (bigScreen != null) bigScreen.keepWindowSize = true;
+            }
+
             // 连接
             bool shouldRun = d.enableDouyinLive;
             if (shouldRun && !running) StartLive(d.douyinWsUrl);
@@ -195,16 +202,57 @@ namespace DouyinLive
                     like.OnEvent(ev);
                     break;
                 case DouyinMsgType.Enter:
-                case DouyinMsgType.Follow:
                 case DouyinMsgType.Share:
                 case DouyinMsgType.FansClub:
                     welcome.OnEvent(ev);
                     break;
+                case DouyinMsgType.Follow:
+                    welcome.OnEvent(ev);
+                    TriggerBigHeadMoment();   // 关注 → 大头特写致谢
+                    break;
                 case DouyinMsgType.Gift:
                     danmakuAI.MarkGifter(ev.UserId);
                     reward.OnGift(ev);
+                    TriggerBigHeadMoment();   // 礼物 → 大头特写致谢
                     break;
             }
+        }
+
+        // ---------- 大头特写：关注/礼物时镜头推到脸部说感谢，说完恢复 ----------
+
+        bool bigHeadBusy;
+
+        void TriggerBigHeadMoment()
+        {
+            var d = SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data : null;
+            if (d == null || !d.douyinBigHeadReaction) return;
+            if (bigHeadBusy) return;
+            // 唱歌/跳舞时不抢镜
+            if (songService != null && songService.IsPlaying) return;
+            StartCoroutine(BigHeadMoment());
+        }
+
+        System.Collections.IEnumerator BigHeadMoment()
+        {
+            var handler = FindFirstObjectByType<AvatarBigScreenHandler>();
+            if (handler == null || handler.IsBigScreenActive) yield break;
+
+            bigHeadBusy = true;
+            handler.keepWindowSize = true;   // 直播采集时窗口尺寸不能变
+            handler.SetBigScreen(true);
+
+            // 等感谢语音说完（1秒起步，最长12秒兜底）
+            yield return new WaitForSeconds(1f);
+            float t = 0f;
+            while (t < 12f && speech != null && (speech.IsSpeaking || speech.QueueCount > 0))
+            {
+                t += Time.deltaTime;
+                yield return null;
+            }
+            yield return new WaitForSeconds(1.2f);
+
+            handler.SetBigScreen(false);
+            bigHeadBusy = false;
         }
 
         bool IsBlocked()

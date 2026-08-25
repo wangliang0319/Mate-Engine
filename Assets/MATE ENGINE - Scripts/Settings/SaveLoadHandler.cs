@@ -192,6 +192,7 @@ public class SaveLoadHandler : MonoBehaviour
         public string douyinLivePrompt = "";
         public bool douyinIdleChatterEnabled = true;
         public float douyinIdleThreshold = 90f;
+        public bool douyinBigHeadReaction = true;   // 关注/礼物时大头特写致谢
         public bool douyinIdleAutoSongEnabled = true;
         public float douyinIdleAutoSongThreshold = 300f;
         public List<string> douyinIdleSongList = new()

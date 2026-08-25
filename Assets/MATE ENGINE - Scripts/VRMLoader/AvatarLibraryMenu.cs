@@ -472,6 +472,17 @@ public class AvatarLibraryMenu : MonoBehaviour
         string newJson = JsonConvert.SerializeObject(entries, Formatting.Indented);
         File.WriteAllText(avatarsJsonPath, newJson);
 
+        // 若删除的是当前使用中的模型：必须清除记忆并切回默认模型，
+        // 否则下次启动自动加载该路径时会重新登记进库（表现为"删不掉"）
+        if (SaveLoadHandler.Instance != null && SaveLoadHandler.Instance.data != null &&
+            SaveLoadHandler.Instance.data.selectedModelPath == entryToRemove.filePath)
+        {
+            SaveLoadHandler.Instance.data.selectedModelPath = "";
+            SaveLoadHandler.Instance.SaveToDisk();
+            var loader = FindFirstObjectByType<VRMLoader>();
+            if (loader != null) loader.ActivateDefaultModel();
+        }
+
         ReloadAvatars();
     }
     private void SaveAvatars()

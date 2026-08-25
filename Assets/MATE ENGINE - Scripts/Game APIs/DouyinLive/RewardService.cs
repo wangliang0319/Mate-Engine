@@ -25,8 +25,11 @@ namespace DouyinLive
         public List<GiftRuleData> Rules = new List<GiftRuleData>();
 
         AvatarDanceHandler dance;
+        VRMLoader vrmLoader;
+        float lastSwitchAt = -999f;
+        const float SwitchCooldown = 30f;   // 换角色冷却，防刷屏
         readonly System.Random rng = new System.Random();
-        static readonly Regex RequestRegex = new Regex(@"^\s*(点舞|点歌)\s*(.*)$", RegexOptions.Compiled);
+        static readonly Regex RequestRegex = new Regex(@"^\s*(点歌|换角色)\s*(.*)$", RegexOptions.Compiled);
 
         AvatarDanceHandler Dance
         {
@@ -72,8 +75,55 @@ namespace DouyinLive
                 return true;
             }
 
-            HandleRequest(name, title); // 点舞 → 本地舞蹈库
+            // 换角色：从模型库随机切换一个不同的已加载 VRM
+            SwitchRandomAvatar(name);
             return true;
+        }
+
+        // ---------- 换角色 ----------
+
+        void SwitchRandomAvatar(string userName)
+        {
+            if (Time.unscaledTime - lastSwitchAt < SwitchCooldown)
+            {
+                Speech?.Enqueue("刚换过啦，让我先穿一会儿这身嘛~", SpeechPipeline.Priority.AIReply, 20f);
+                return;
+            }
+            if (vrmLoader == null) vrmLoader = UnityEngine.Object.FindFirstObjectByType<VRMLoader>();
+            if (vrmLoader == null) return;
+
+            string current = SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data.selectedModelPath : "";
+            var candidates = new List<string>();
+            try
+            {
+                string jsonPath = System.IO.Path.Combine(Application.persistentDataPath, "avatars.json");
+                if (System.IO.File.Exists(jsonPath))
+                {
+                    var entries = Newtonsoft.Json.JsonConvert.DeserializeObject<List<AvatarLibraryMenu.AvatarEntry>>(
+                        System.IO.File.ReadAllText(jsonPath));
+                    if (entries != null)
+                        foreach (var e in entries)
+                            if (e != null && !string.IsNullOrEmpty(e.filePath) && e.filePath != current &&
+                                System.IO.File.Exists(e.filePath))
+                                candidates.Add(e.filePath);
+                }
+            }
+            catch (System.Exception ex) { Debug.LogWarning("[RewardService] read avatars.json failed: " + ex.Message); }
+
+            // 默认模型也算一个候选（当前不是默认模型时）
+            if (!string.IsNullOrEmpty(current)) candidates.Add("");
+
+            if (candidates.Count == 0)
+            {
+                Speech?.Enqueue("衣柜里暂时没有别的角色啦~", SpeechPipeline.Priority.AIReply, 20f);
+                return;
+            }
+
+            lastSwitchAt = Time.unscaledTime;
+            string pick = candidates[rng.Next(candidates.Count)];
+            Speech?.Enqueue($"{userName} 想看新角色是吧？看我变身！", SpeechPipeline.Priority.GiftThanks, 20f);
+            if (string.IsNullOrEmpty(pick)) vrmLoader.ActivateDefaultModel();
+            else vrmLoader.LoadVRM(pick);
         }
 
         public void OnGift(DouyinEvent ev)

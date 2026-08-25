@@ -30,6 +30,19 @@ public class AvatarBigScreenHandler : MonoBehaviour
     [Header("Canvas Blocking")]
     public GameObject moveCanvas;
 
+    [Header("Window")]
+    [Tooltip("Keep the window at its current size (camera zoom only). Needed when the window is being captured by streaming software, which breaks if the window is resized to full monitor.")]
+    public bool keepWindowSize = false;
+
+    public bool IsBigScreenActive => isBigScreenActive;
+
+    // 供外部代码（如直播互动）程序化开关大头模式
+    public void SetBigScreen(bool on)
+    {
+        if (on && !isBigScreenActive && !isFading) ActivateBigScreen();
+        else if (!on && isBigScreenActive && !isFading) DeactivateBigScreen();
+    }
+
     private IntPtr unityHWND = IntPtr.Zero;
     private bool isBigScreenActive = false;
     private Vector3 originalCamPos;
@@ -255,7 +268,7 @@ public class AvatarBigScreenHandler : MonoBehaviour
             if (avatarAnimator != null) avatarAnimator.SetBool("isBigScreen", false);
             if (avatarAnimatorController != null) avatarAnimatorController.BlockDraggingOverride = false;
             if (moveCanvas != null && moveCanvasWasActive) moveCanvas.SetActive(true);
-            if (unityHWND != IntPtr.Zero && originalRectSet)
+            if (unityHWND != IntPtr.Zero && originalRectSet && !keepWindowSize)
             {
                 int w = originalWindowRect.right - originalWindowRect.left;
                 int h = originalWindowRect.bottom - originalWindowRect.top;
@@ -318,7 +331,7 @@ public class AvatarBigScreenHandler : MonoBehaviour
         camPos.y = toY;
         MainCamera.transform.position = camPos;
 
-        if (toFadeY && unityHWND != IntPtr.Zero)
+        if (toFadeY && unityHWND != IntPtr.Zero && !keepWindowSize)
         {
             if (GetWindowRect(unityHWND, out RECT windowRect))
             {

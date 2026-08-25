@@ -16,7 +16,7 @@
     g <礼物名> [数量] [抖币]  礼物  例: g 玫瑰 3 1
     gg           大礼物连击测试（火箭x3，共300抖币）
     song <歌名>  点歌              例: song 孤勇者
-    dance [名]   点舞（本地舞蹈库） 例: dance 极乐净土
+    sw           换角色（随机切换VRM）
     auto         切换自动模式开/关
     q            退出
 """
@@ -126,12 +126,11 @@ async def auto_loop():
             kw = random.choice(SONGS)
             await broadcast(ev_chat("点歌 " + kw), f"自动点歌 {kw}")
         else:
-            kw = random.choice(DANCES)
-            await broadcast(ev_chat(("点舞 " + kw).strip()), f"自动点舞 {kw or '(随机)'}")
+            await broadcast(ev_chat("换角色"), "自动换角色")
 
 def input_thread(loop):
     global AUTO
-    help_short = "命令: c <弹幕> | e 进房 | f 关注 | s 分享 | l [数] 点赞 | g <礼物> [数] [抖币] | gg 大礼物 | song <歌名> | dance [舞名] | auto | q"
+    help_short = "命令: c <弹幕> | e 进房 | f 关注 | s 分享 | l [数] 点赞 | g <礼物> [数] [抖币] | gg 大礼物 | song <歌名> | sw 换角色 | auto | q"
     print(help_short)
     while True:
         try:
@@ -172,9 +171,8 @@ def input_thread(loop):
         elif cmd == "song":
             kw = " ".join(args) or "孤勇者"
             payload, desc = ev_chat("点歌 " + kw), f"点歌 {kw}"
-        elif cmd == "dance":
-            kw = " ".join(args)
-            payload, desc = ev_chat(("点舞 " + kw).strip()), f"点舞 {kw or '(随机)'}"
+        elif cmd == "sw":
+            payload, desc = ev_chat("换角色"), "换角色"
         else:
             print(help_short)
             continue
