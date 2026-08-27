@@ -138,6 +138,13 @@ namespace DouyinLive
             Vector3 screen = uiCam.WorldToScreenPoint(anchorWorld);
             if (screen.z <= 0f) return; // 头在相机后方，保持原位
 
+            // 钳制在窗口内（窄窗口/角色贴边时文字不出界）
+            float halfW = bubbleWidth * 0.55f;
+            float minX = pivot.x >= 1f ? halfW * 2f + 20f : (pivot.x > 0f ? halfW : 20f);
+            float maxX = pivot.x <= 0f ? Screen.width - halfW * 2f - 20f : (pivot.x < 1f ? Screen.width - halfW : Screen.width - 20f);
+            if (minX < maxX) screen.x = Mathf.Clamp(screen.x, minX, maxX);
+            screen.y = Mathf.Clamp(screen.y, 60f, Screen.height - 120f);
+
             var rt = activeBubble.GetRectTransform();
             // 屏幕坐标 → chatContainer 本地坐标
             Camera camForCanvas = null;
