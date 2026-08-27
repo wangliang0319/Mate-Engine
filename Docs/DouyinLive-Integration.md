@@ -18,6 +18,11 @@
 | 冷场暖场 | 90 秒无互动 | 自动求赞/求关注/才艺引导/闲聊，四类轮换 |
 | 冷场自动唱歌 | 冷场超 5 分钟 | 从歌单随机唱一首+跳舞（默认内置古风热歌榜，可自定义） |
 | 情绪动作 | 说话内容关键词 | 谢谢/抱抱→开心表情+互动动画；难过/惊喜同理 |
+| 竖屏直播窗口 | F8 / 配置自动 | 窗口变 9:16 竖屏、角色居中，适配竖屏直播采集 |
+| 快捷反应 | 666/哈哈/你好/晚安等 | 预制回复秒回，不走 LLM |
+| 观众记忆 | 自动 | 常客/大哥识别，专属欢迎；AI 回复带观众画像 |
+| 玩法菜单 | 弹幕 `菜单` | 口播可用玩法 |
+| 感谢榜+报时 | 自动 | 每30分钟播礼物Top3；整点报时 |
 
 ## 场景接线（Unity Editor 内一次性完成）
 
@@ -90,6 +95,15 @@
 `{ "giftName": "玫瑰", "minDiamond": 0, "minCount": 1, "action": "randomDance" }`，
 action：`thanks` / `randomDance` / `builtinDance` / `dance:<舞名>`。
 三档庆祝始终生效，规则只追加指定舞。
+
+## 数据文件（AppData/LocalLow/Shinymoon/MateEngineX/）
+
+| 文件 | 用途 |
+|---|---|
+| douyin_persona.json | 人设卡：名字/性格/背景/口头禅/禁忌，AI人格来源 |
+| douyin_blocked_words.txt | 敏感词表（一行一词），AI输出含词即静默丢弃 |
+| douyin_audience.json | 观众记忆：来访次数/礼物总额/最近弹幕（自动维护） |
+| douyin_gift_rules.json | 礼物→动作规则 |
 
 ## 弹幕模拟器（Tools/douyin_mock_server.py）
 
