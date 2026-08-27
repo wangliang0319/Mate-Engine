@@ -8,6 +8,7 @@ namespace DouyinLive
     public class WelcomeService
     {
         public SpeechPipeline Speech;
+        public AudienceMemory Audience;   // 老观众识别
         public float Cooldown = 8f;
         public bool Enabled = true;
 
@@ -35,6 +36,12 @@ namespace DouyinLive
             "欢迎 {user} 加入粉丝团，我们是一家人啦！", "谢谢 {user} 加团，么么哒~"
         };
 
+        static readonly string[] ReturnTemplates = {
+            "{user} 又来啦，老朋友快坐~",
+            "又见到 {user} 啦，想我了没~",
+            "{user} 回来啦，今天也要开心哦~",
+        };
+
         readonly System.Random rng = new System.Random();
 
         public void OnEvent(DouyinEvent ev)
@@ -46,6 +53,24 @@ namespace DouyinLive
             {
                 case DouyinMsgType.Enter:
                     if (!welcomedThisSession.Add(ev.UserId)) return;
+                    // 先读历史（本次来访之前的状态），再记录本次来访
+                    var v = Audience != null ? Audience.Get(ev.UserId) : null;
+                    Audience?.RecordVisit(ev.UserId, ev.Nickname);
+                    if (v != null && v.giftDiamonds >= 100)
+                    {
+                        // 大哥回归：跳过合并队列，立刻专属欢迎
+                        Speech.Enqueue($"哇，我们的大哥 {name} 回来啦，全体欢迎！",
+                            SpeechPipeline.Priority.Milestone, 30f);
+                        lastSpokenAt = Time.unscaledTime;
+                        return;
+                    }
+                    if (v != null && v.visits >= 1)
+                    {
+                        Speech.Enqueue(Pick(ReturnTemplates).Replace("{user}", name),
+                            SpeechPipeline.Priority.Welcome, 30f);
+                        lastSpokenAt = Time.unscaledTime;
+                        return;
+                    }
                     pendingNames.Add(name);
                     break;
                 case DouyinMsgType.Follow:

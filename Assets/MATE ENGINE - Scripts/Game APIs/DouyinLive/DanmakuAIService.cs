@@ -21,10 +21,12 @@ namespace DouyinLive
         public IChatBackend Local;
         public bool FallbackToLocal = true;
         public PersonaCard Persona;          // 人设卡（douyin_persona.json）
+        public AudienceMemory Audience;      // 观众记忆
+        public RoomContext Room;             // 直播间语境
 
         public int RepliedCount { get; private set; }
 
-        class PendingDanmaku { public string User; public string Text; public float At; public bool FromGifter; }
+        class PendingDanmaku { public string User; public string UserId; public string Text; public float At; public bool FromGifter; }
 
         readonly List<PendingDanmaku> queue = new List<PendingDanmaku>();
         readonly List<ChatMsg> history = new List<ChatMsg>();
@@ -108,6 +110,7 @@ namespace DouyinLive
                 queue.Add(new PendingDanmaku
                 {
                     User = string.IsNullOrEmpty(ev.Nickname) ? "观众" : ev.Nickname,
+                    UserId = ev.UserId,
                     Text = text,
                     At = Time.unscaledTime,
                     FromGifter = vip
@@ -143,6 +146,13 @@ namespace DouyinLive
             try
             {
                 string userMsg = item.User + " 说：" + item.Text;
+
+                // 动态上下文：直播间实况 + 观众画像（老朋友/大哥识别）
+                string dynamicContext = "";
+                if (Room != null) dynamicContext += Room.BuildPromptSection();
+                if (Audience != null) dynamicContext += Audience.DescribeForPrompt(item.UserId);
+                string systemPrompt = SystemPrompt +
+                    (dynamicContext.Length > 0 ? " " + dynamicContext : "");
 
                 // 句级流水线：LLM 边流式输出边切句入流，首句即开始 TTS 合成播报，
                 // 首句开口延迟 ≈ LLM 首句时间 + 单句合成时间（原来要等整段生成完）。
@@ -211,7 +221,7 @@ namespace DouyinLive
                 var backend = Cloud != null && Cloud.IsAvailable ? Cloud : null;
                 if (backend != null)
                 {
-                    try { reply = await RunBackend(backend, userMsg, OnDelta); }
+                    try { reply = await RunBackend(backend, systemPrompt, userMsg, OnDelta); }
                     catch (Exception ex)
                     {
                         Debug.LogWarning("[DanmakuAI] Cloud failed: " + ex.Message);
@@ -221,7 +231,7 @@ namespace DouyinLive
                 if (string.IsNullOrEmpty(reply) && !emittedAny &&
                     FallbackToLocal && Local != null && Local.IsAvailable)
                 {
-                    try { reply = await RunBackend(Local, userMsg, OnDelta); }
+                    try { reply = await RunBackend(Local, systemPrompt, userMsg, OnDelta); }
                     catch (Exception ex)
                     {
                         Debug.LogWarning("[DanmakuAI] Local failed: " + ex.Message);
@@ -246,10 +256,10 @@ namespace DouyinLive
             finally { busy = false; }
         }
 
-        async Task<string> RunBackend(IChatBackend backend, string userMsg, Action<string> onDelta)
+        async Task<string> RunBackend(IChatBackend backend, string systemPrompt, string userMsg, Action<string> onDelta)
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(RequestTimeout));
-            return await backend.ChatAsync(SystemPrompt, history, userMsg, onDelta, cts.Token);
+            return await backend.ChatAsync(systemPrompt, history, userMsg, onDelta, cts.Token);
         }
 
         static string Sanitize(string s)

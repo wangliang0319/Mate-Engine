@@ -32,6 +32,9 @@ namespace DouyinLive
         readonly RewardService reward = new RewardService();
         readonly DanmakuAIService danmakuAI = new DanmakuAIService();
         readonly IdleChatterService idleChatter = new IdleChatterService();
+        readonly AudienceMemory audience = new AudienceMemory();
+        readonly RoomContext room = new RoomContext();
+        bool audienceLoaded;
 
         CloudChatBackend cloudBackend;
         LocalChatBackend localBackend;
@@ -121,6 +124,11 @@ namespace DouyinLive
             danmakuAI.FallbackToLocal = d.aiFallbackToLocal;
             danmakuAI.Persona = PersonaCard.LoadOrCreate();   // douyin_persona.json
             ContentFilter.Load();                             // douyin_blocked_words.txt
+            if (!audienceLoaded) { audience.Load(); audienceLoaded = true; }
+            room.Song = songService;
+            danmakuAI.Audience = audience;
+            danmakuAI.Room = room;
+            welcome.Audience = audience;
 
             idleChatter.Speech = speech;
             idleChatter.AI = danmakuAI;
@@ -163,6 +171,7 @@ namespace DouyinLive
             client.Start();
             running = true;
             welcome.ResetSession();
+            room.ResetSession();
             like.ResetSession();
             danmakuAI.ResetSession();
             idleChatter.ResetSession();
@@ -196,6 +205,7 @@ namespace DouyinLive
                 danmakuAI.Tick();
                 idleChatter.Tick();
             }
+            audience.SaveIfDirty();
         }
 
         void Route(DouyinEvent ev)
@@ -205,6 +215,8 @@ namespace DouyinLive
             switch (ev.Type)
             {
                 case DouyinMsgType.Chat:
+                    audience.RecordMessage(ev.UserId, ev.Nickname, ev.Content);
+                    room.AddChat(ev.Nickname, ev.Content);
                     if (reward.TryHandleDanmaku(ev)) return;
                     danmakuAI.OnDanmaku(ev);
                     break;
@@ -222,6 +234,9 @@ namespace DouyinLive
                     break;
                 case DouyinMsgType.Gift:
                     danmakuAI.MarkGifter(ev.UserId);
+                    audience.RecordGift(ev.UserId, ev.Nickname,
+                        Mathf.Max(1, ev.DiamondCount) * Mathf.Max(1, ev.GiftCount));
+                    room.LastGiftDesc = $"{ev.Nickname}送的{ev.GiftName}";
                     reward.OnGift(ev);
                     TriggerBigHeadMoment();   // 礼物 → 大头特写致谢
                     break;
@@ -276,6 +291,7 @@ namespace DouyinLive
         {
             if (Instance == this) Instance = null;
             client?.Stop();
+            audience.SaveIfDirty(force: true);
         }
 
         // ---------- 换角色后身高归一化：新模型缩放到与上一个角色相同的显示高度 ----------
