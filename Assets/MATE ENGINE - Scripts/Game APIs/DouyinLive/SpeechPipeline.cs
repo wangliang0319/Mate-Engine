@@ -17,19 +17,30 @@ namespace DouyinLive
     {
         public enum Priority { GiftThanks = 0, AIReply = 1, Milestone = 2, Welcome = 3, LikeThanks = 4 }
 
+        // 句子流：生产方（如流式LLM）边生成边 Append，说完 Complete；
+        // 普通文本播报在内部也会转成一个"已完成"的流，播报路径统一。
+        public class SpeechStream
+        {
+            readonly System.Collections.Concurrent.ConcurrentQueue<string> q =
+                new System.Collections.Concurrent.ConcurrentQueue<string>();
+            volatile bool completed;
+            public bool Completed => completed;
+            public void Append(string sentence)
+            {
+                if (!string.IsNullOrWhiteSpace(sentence)) q.Enqueue(sentence.Trim());
+            }
+            public void Complete() => completed = true;
+            internal bool TryTake(out string s) => q.TryDequeue(out s);
+        }
+
         class SpeechItem
         {
             public string Text;
+            public SpeechStream Stream;
             public Priority Prio;
             public float EnqueuedAt;
             public float TTLSeconds;   // 超时未播则丢弃，<=0 不过期
             public long Seq;
-        }
-
-        class SynthSentence
-        {
-            public string Text;
-            public Task<TTSResult> Synth;
         }
 
         [Header("Output")]
@@ -189,19 +200,58 @@ namespace DouyinLive
         public void Enqueue(string text, Priority prio, float ttlSeconds = 30f)
         {
             if (string.IsNullOrWhiteSpace(text)) return;
-            var item = new SpeechItem
+            var stream = new SpeechStream();
+            foreach (var s in SplitSentences(text.Trim())) stream.Append(s);
+            stream.Complete();
+            EnqueueInternal(new SpeechItem
             {
                 Text = text.Trim(),
+                Stream = stream,
                 Prio = prio,
                 EnqueuedAt = Time.unscaledTime,
                 TTLSeconds = ttlSeconds,
                 Seq = ++seqCounter
-            };
+            });
+        }
+
+        // 流式入队：立即返回流句柄，生产方随后 Append/Complete（仅主线程调用）
+        public SpeechStream EnqueueStream(Priority prio, float ttlSeconds = 45f)
+        {
+            var stream = new SpeechStream();
+            EnqueueInternal(new SpeechItem
+            {
+                Text = "",
+                Stream = stream,
+                Prio = prio,
+                EnqueuedAt = Time.unscaledTime,
+                TTLSeconds = ttlSeconds,
+                Seq = ++seqCounter
+            });
+            return stream;
+        }
+
+        // 已有流对象入队（生产方先建流再入队的场景）
+        public void EnqueueStream(SpeechStream stream, Priority prio, float ttlSeconds = 45f)
+        {
+            if (stream == null) return;
+            EnqueueInternal(new SpeechItem
+            {
+                Text = "",
+                Stream = stream,
+                Prio = prio,
+                EnqueuedAt = Time.unscaledTime,
+                TTLSeconds = ttlSeconds,
+                Seq = ++seqCounter
+            });
+        }
+
+        void EnqueueInternal(SpeechItem item)
+        {
             lock (pending)
             {
                 // 同优先级欢迎/点赞类只保留最新，避免积压
-                if (prio == Priority.Welcome || prio == Priority.LikeThanks)
-                    pending.RemoveAll(p => p.Prio == prio);
+                if (item.Prio == Priority.Welcome || item.Prio == Priority.LikeThanks)
+                    pending.RemoveAll(p => p.Prio == item.Prio);
                 pending.Add(item);
             }
         }
@@ -227,84 +277,100 @@ namespace DouyinLive
             }
         }
 
-        // ---------- 播报 ----------
+        // ---------- 播报：统一消费句子流（边播当前句、边合成下一句） ----------
 
         IEnumerator SpeakRoutine(SpeechItem item)
         {
             speaking = true;
-            var sentences = SplitSentences(item.Text);
+            var stream = item.Stream;
             var provider = PickProvider();
-
-            if (provider == null || !TTSEnabled)
-            {
-                yield return FallbackBubbleOnly(item.Text);
-                speaking = false;
-                yield break;
-            }
+            bool useTTS = provider != null && TTSEnabled;
 
             ShowBubble("");
-            // 注意：isTalking 延迟到第一句音频实际开播时再设，
-            // 否则 TTS 合成的 1~2 秒里嘴已在动、声音未到（口型超前）。
-
-            // 流水线：预取下一句的合成任务
-            var synths = new List<SynthSentence>();
-            foreach (var s in sentences)
-                synths.Add(new SynthSentence { Text = s });
-
-            const int Prefetch = 2;
             var shownText = new StringBuilder();
-            bool anyPlayed = false;
+            bool anyShown = false;
+            string prefetchText = null;
+            Task<TTSResult> prefetchSynth = null;
+            float starve = 0f;
 
-            for (int i = 0; i < synths.Count; i++)
+            while (true)
             {
-                // 启动本句与预取句
-                for (int k = i; k < Mathf.Min(i + Prefetch, synths.Count); k++)
-                    if (synths[k].Synth == null)
-                        synths[k].Synth = SynthesizeSafe(provider, synths[k].Text);
-
-                var cur = synths[i];
-                while (!cur.Synth.IsCompleted) yield return null;
-
-                TTSResult pcm = cur.Synth.Status == TaskStatus.RanToCompletion ? cur.Synth.Result : null;
-                if (pcm == null || !pcm.IsValid)
+                // 取本句（优先用已预取的）
+                string sent;
+                Task<TTSResult> synth;
+                if (prefetchText != null)
                 {
-                    // 本句失败：字幕仍显示，跳到下一句
-                    shownText.Append(cur.Text);
-                    if (activeBubble != null) activeBubble.SetText(shownText.ToString());
-                    continue;
+                    sent = prefetchText; synth = prefetchSynth;
+                    prefetchText = null; prefetchSynth = null;
+                }
+                else
+                {
+                    string s = null;
+                    while (!stream.TryTake(out s))
+                    {
+                        if (stream.Completed) break;
+                        starve += Time.deltaTime;
+                        if (starve > 20f) break;    // 上游卡死兜底
+                        yield return null;
+                    }
+                    if (s == null) break;           // 流结束
+                    starve = 0f;
+                    sent = s;
+                    synth = useTTS ? SynthesizeSafe(provider, s) : null;
                 }
 
-                var clip = AudioClip.Create("tts", pcm.Samples.Length / pcm.Channels, pcm.Channels, pcm.SampleRate, false);
-                clip.SetData(pcm.Samples, 0);
-
-                shownText.Append(cur.Text);
-                if (activeBubble != null) activeBubble.SetText(shownText.ToString());
-
-                if (voiceSource != null)
+                // 等本句合成；期间下一句一到就开始预取合成（流水线核心）
+                if (synth != null)
                 {
-                    voiceSource.clip = clip;
-                    voiceSource.volume = volume;
-                    voiceSource.Play();
-                    anyPlayed = true;
-                    if (avatarAnimator != null) avatarAnimator.SetBool("isTalking", true);
-                    ApplyEmotionFromText(cur.Text);
-                    while (voiceSource != null && voiceSource.isPlaying)
+                    while (!synth.IsCompleted)
                     {
-                        // P0 打断：句间检查在循环外，句内不打断
+                        if (prefetchText == null && stream.TryTake(out var peek))
+                        {
+                            prefetchText = peek;
+                            prefetchSynth = SynthesizeSafe(provider, peek);
+                        }
                         yield return null;
                     }
                 }
-                Destroy(clip);
+
+                shownText.Append(sent);
+                if (activeBubble != null) activeBubble.SetText(shownText.ToString());
+                anyShown = true;
+
+                TTSResult pcm = synth != null && synth.Status == TaskStatus.RanToCompletion ? synth.Result : null;
+                if (pcm != null && pcm.IsValid && voiceSource != null)
+                {
+                    var clip = AudioClip.Create("tts", pcm.Samples.Length / pcm.Channels, pcm.Channels, pcm.SampleRate, false);
+                    clip.SetData(pcm.Samples, 0);
+                    voiceSource.clip = clip;
+                    voiceSource.volume = volume;
+                    voiceSource.Play();
+                    if (avatarAnimator != null) avatarAnimator.SetBool("isTalking", true);
+                    ApplyEmotionFromText(sent);
+                    while (voiceSource != null && voiceSource.isPlaying)
+                    {
+                        if (prefetchText == null && stream.TryTake(out var peek2))
+                        {
+                            prefetchText = peek2;
+                            prefetchSynth = SynthesizeSafe(provider, peek2);
+                        }
+                        yield return null;
+                    }
+                    Destroy(clip);
+                }
+                else if (!useTTS)
+                {
+                    // 无TTS降级：字幕逐句停留
+                    if (avatarAnimator != null) avatarAnimator.SetBool("isTalking", true);
+                    yield return new WaitForSeconds(Mathf.Clamp(sent.Length * 0.12f, 0.6f, 4f));
+                }
 
                 // 句间打断检查：有更高优先级排队 → 提前结束剩余句子
                 if (HasHigherPriorityWaiting(item.Prio)) break;
             }
 
-            if (!anyPlayed && shownText.Length > 0)
-                yield return new WaitForSeconds(Mathf.Min(shownText.Length * 0.1f, fallbackLinger));
-
             if (avatarAnimator != null) avatarAnimator.SetBool("isTalking", false);
-            yield return new WaitForSeconds(bubbleLinger);
+            if (anyShown) yield return new WaitForSeconds(bubbleLinger);
             RemoveBubble();
             speaking = false;
         }
@@ -353,24 +419,6 @@ namespace DouyinLive
                 }
                 return null;
             }
-        }
-
-        // ---------- 纯气泡降级 ----------
-
-        IEnumerator FallbackBubbleOnly(string text)
-        {
-            ShowBubble("");
-            if (avatarAnimator != null) avatarAnimator.SetBool("isTalking", true);
-            float delay = 1f / Mathf.Max(streamSpeed, 1);
-            for (int len = 1; len <= text.Length; len++)
-            {
-                if (activeBubble == null) break;
-                activeBubble.SetText(text.Substring(0, len));
-                yield return new WaitForSeconds(delay);
-            }
-            if (avatarAnimator != null) avatarAnimator.SetBool("isTalking", false);
-            yield return new WaitForSeconds(fallbackLinger);
-            RemoveBubble();
         }
 
         // ---------- 内容驱动表情/动作 ----------

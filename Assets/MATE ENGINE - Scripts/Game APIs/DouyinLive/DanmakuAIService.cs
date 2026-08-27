@@ -143,52 +143,113 @@ namespace DouyinLive
             try
             {
                 string userMsg = item.User + " 说：" + item.Text;
-                string reply = null;
 
+                // 句级流水线：LLM 边流式输出边切句入流，首句即开始 TTS 合成播报，
+                // 首句开口延迟 ≈ LLM 首句时间 + 单句合成时间（原来要等整段生成完）。
+                var full = new StringBuilder();     // 完整回复（入历史）
+                var carry = new StringBuilder();    // 未成句缓冲
+                SpeechPipeline.SpeechStream stream = null;
+                bool emittedAny = false;
+                object gate = new object();
+
+                void EmitSentences(bool flush)
+                {
+                    // gate 已持有。从 carry 切出完整句子逐句入流
+                    var buf = carry.ToString();
+                    int start = 0;
+                    for (int i = 0; i < buf.Length; i++)
+                    {
+                        char c = buf[i];
+                        bool boundary = c == '。' || c == '！' || c == '？' || c == '!' || c == '?' ||
+                                        c == '；' || c == ';' || c == '\n';
+                        if (boundary && i - start >= 3)
+                        {
+                            EmitOne(buf.Substring(start, i - start + 1));
+                            start = i + 1;
+                        }
+                    }
+                    carry.Clear();
+                    if (start < buf.Length)
+                    {
+                        if (flush) EmitOne(buf.Substring(start));
+                        else carry.Append(buf, start, buf.Length - start);
+                    }
+                }
+
+                void EmitOne(string raw)
+                {
+                    var clean = Sanitize(raw);
+                    if (string.IsNullOrEmpty(clean)) return;
+                    if (!ContentFilter.IsSafe(clean))
+                    {
+                        Debug.LogWarning("[DanmakuAI] Sentence blocked by content filter");
+                        return;
+                    }
+                    if (stream == null)
+                    {
+                        var s = new SpeechPipeline.SpeechStream();
+                        stream = s;
+                        MainThreadDispatcher.Post(() =>
+                            Speech.EnqueueStream(s, SpeechPipeline.Priority.AIReply, 45f));
+                    }
+                    stream.Append(clean);
+                    emittedAny = true;
+                }
+
+                void OnDelta(string delta)
+                {
+                    if (string.IsNullOrEmpty(delta)) return;
+                    lock (gate)
+                    {
+                        full.Append(delta);
+                        carry.Append(delta);
+                        EmitSentences(false);
+                    }
+                }
+
+                string reply = null;
                 var backend = Cloud != null && Cloud.IsAvailable ? Cloud : null;
                 if (backend != null)
                 {
-                    try { reply = await RunBackend(backend, userMsg); }
+                    try { reply = await RunBackend(backend, userMsg, OnDelta); }
                     catch (Exception ex)
                     {
                         Debug.LogWarning("[DanmakuAI] Cloud failed: " + ex.Message);
                     }
                 }
-                if (string.IsNullOrEmpty(reply) && FallbackToLocal && Local != null && Local.IsAvailable)
+                // 云端已开口的话不再走本地兜底（避免前后音色/人格断裂）
+                if (string.IsNullOrEmpty(reply) && !emittedAny &&
+                    FallbackToLocal && Local != null && Local.IsAvailable)
                 {
-                    try { reply = await RunBackend(Local, userMsg); }
+                    try { reply = await RunBackend(Local, userMsg, OnDelta); }
                     catch (Exception ex)
                     {
                         Debug.LogWarning("[DanmakuAI] Local failed: " + ex.Message);
                     }
                 }
-                if (string.IsNullOrEmpty(reply)) return;
 
-                reply = Sanitize(reply);
-                if (string.IsNullOrEmpty(reply)) return;
-                // 合规：AI 输出含敏感词直接不播（宁可不说不能说错）
-                if (!ContentFilter.IsSafe(reply))
+                lock (gate)
                 {
-                    Debug.LogWarning("[DanmakuAI] Reply blocked by content filter");
-                    return;
+                    EmitSentences(true);      // 冲出残句
+                    stream?.Complete();
                 }
 
+                string fullReply = Sanitize(!string.IsNullOrEmpty(reply) ? reply : full.ToString());
+                if (string.IsNullOrEmpty(fullReply) || !emittedAny) return;
+
                 history.Add(new ChatMsg("user", userMsg));
-                history.Add(new ChatMsg("assistant", reply));
+                history.Add(new ChatMsg("assistant", fullReply));
                 while (history.Count > HistoryTurns * 2) history.RemoveAt(0);
 
                 RepliedCount++;
-                // 回主线程入队由 Speech.Enqueue 内部无 Unity API 依赖的部分保证线程安全：
-                // Enqueue 仅操作 lock 保护的列表与 Time —— Time 必须主线程，因此这里派发回主线程
-                MainThreadDispatcher.Post(() => Speech.Enqueue(reply, SpeechPipeline.Priority.AIReply, 45f));
             }
             finally { busy = false; }
         }
 
-        async Task<string> RunBackend(IChatBackend backend, string userMsg)
+        async Task<string> RunBackend(IChatBackend backend, string userMsg, Action<string> onDelta)
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(RequestTimeout));
-            return await backend.ChatAsync(SystemPrompt, history, userMsg, null, cts.Token);
+            return await backend.ChatAsync(SystemPrompt, history, userMsg, onDelta, cts.Token);
         }
 
         static string Sanitize(string s)
