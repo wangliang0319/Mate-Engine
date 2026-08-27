@@ -29,7 +29,7 @@ namespace DouyinLive
         float lastSwitchAt = -999f;
         const float SwitchCooldown = 30f;   // 换角色冷却，防刷屏
         readonly System.Random rng = new System.Random();
-        static readonly Regex RequestRegex = new Regex(@"^\s*(点歌|换角色)\s*(.*)$", RegexOptions.Compiled);
+        static readonly Regex RequestRegex = new Regex(@"^\s*(点歌|换角色|菜单|玩法)\s*(.*)$", RegexOptions.Compiled);
 
         AvatarDanceHandler Dance
         {
@@ -51,6 +51,13 @@ namespace DouyinLive
             string cmd = m.Groups[1].Value;
             string title = m.Groups[2].Value.Trim();
             string name = string.IsNullOrEmpty(ev.Nickname) ? "朋友" : ev.Nickname;
+
+            if (cmd == "菜单" || cmd == "玩法")
+            {
+                Speech?.Enqueue("给大家报下玩法哦：发 点歌加歌名 我就唱给你听；发 换角色 我就换一身新形象；" +
+                    "点赞关注我都会感谢，送礼物还能看我跳舞哦~", SpeechPipeline.Priority.AIReply, 30f);
+                return true;
+            }
 
             if (cmd == "点歌")
             {

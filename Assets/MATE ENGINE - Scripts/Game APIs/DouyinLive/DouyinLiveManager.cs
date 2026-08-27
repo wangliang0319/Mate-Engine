@@ -34,6 +34,7 @@ namespace DouyinLive
         readonly IdleChatterService idleChatter = new IdleChatterService();
         readonly AudienceMemory audience = new AudienceMemory();
         readonly RoomContext room = new RoomContext();
+        readonly LiveOpsService liveOps = new LiveOpsService();
         bool audienceLoaded;
 
         CloudChatBackend cloudBackend;
@@ -129,6 +130,7 @@ namespace DouyinLive
             danmakuAI.Audience = audience;
             danmakuAI.Room = room;
             welcome.Audience = audience;
+            liveOps.Speech = speech;
 
             idleChatter.Speech = speech;
             idleChatter.AI = danmakuAI;
@@ -172,6 +174,7 @@ namespace DouyinLive
             running = true;
             welcome.ResetSession();
             room.ResetSession();
+            liveOps.ResetSession();
             like.ResetSession();
             danmakuAI.ResetSession();
             idleChatter.ResetSession();
@@ -204,6 +207,7 @@ namespace DouyinLive
                 welcome.Tick();
                 danmakuAI.Tick();
                 idleChatter.Tick();
+                liveOps.Tick();
             }
             audience.SaveIfDirty();
         }
@@ -237,6 +241,8 @@ namespace DouyinLive
                     audience.RecordGift(ev.UserId, ev.Nickname,
                         Mathf.Max(1, ev.DiamondCount) * Mathf.Max(1, ev.GiftCount));
                     room.LastGiftDesc = $"{ev.Nickname}送的{ev.GiftName}";
+                    liveOps.RecordGift(ev.UserId, ev.Nickname,
+                        Mathf.Max(1, ev.DiamondCount) * Mathf.Max(1, ev.GiftCount));
                     reward.OnGift(ev);
                     TriggerBigHeadMoment();   // 礼物 → 大头特写致谢
                     break;
