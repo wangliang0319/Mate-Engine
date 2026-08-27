@@ -148,12 +148,17 @@ namespace DouyinLive
                 if (bigScreen != null) bigScreen.keepWindowSize = true;
             }
 
-            // 竖屏直播窗口（F8 也可随时切换）
+            // 竖屏直播窗口（F10 也可随时切换）
             var portrait = GetComponent<PortraitWindowController>();
             if (portrait == null) portrait = gameObject.AddComponent<PortraitWindowController>();
-            if (d.enableDouyinLive && d.douyinPortraitWindow && !portrait.Active)
-                portrait.EnterPortrait();
-            else if ((!d.enableDouyinLive || !d.douyinPortraitWindow) && portrait.Active)
+            bool aspectChanged = Mathf.Abs(portrait.aspect - d.douyinPortraitAspect) > 0.01f;
+            portrait.aspect = Mathf.Clamp(d.douyinPortraitAspect, 0.3f, 1.3f);
+            if (d.enableDouyinLive && d.douyinPortraitWindow)
+            {
+                if (portrait.Active && aspectChanged) portrait.ExitPortrait();  // 比例变了重进
+                if (!portrait.Active) portrait.EnterPortrait();
+            }
+            else if (portrait.Active)
                 portrait.ExitPortrait();
 
             // 连接

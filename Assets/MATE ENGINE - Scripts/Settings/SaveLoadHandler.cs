@@ -193,7 +193,8 @@ public class SaveLoadHandler : MonoBehaviour
         public bool douyinIdleChatterEnabled = true;
         public float douyinIdleThreshold = 90f;
         public bool douyinBigHeadReaction = true;   // 关注/礼物时大头特写致谢
-        public bool douyinPortraitWindow = false;   // 竖屏直播窗口(9:16)，F8 可切
+        public bool douyinPortraitWindow = false;   // 竖屏直播窗口，F10 可切
+        public float douyinPortraitAspect = 0.75f;  // 竖屏窗口宽高比(宽/高)；跳舞走位多可调大
         public bool douyinIdleAutoSongEnabled = true;
         public float douyinIdleAutoSongThreshold = 300f;
         public List<string> douyinIdleSongList = new()

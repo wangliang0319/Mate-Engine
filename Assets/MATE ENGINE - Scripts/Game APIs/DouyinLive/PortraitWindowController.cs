@@ -10,7 +10,7 @@ namespace DouyinLive
     public class PortraitWindowController : MonoBehaviour
     {
         public KeyCode hotkey = KeyCode.F10;   // F8 被原项目 MEValueChanger 占用
-        [Range(0.3f, 1f)] public float aspect = 9f / 16f;
+        [Range(0.3f, 1.3f)] public float aspect = 0.75f;      // 窗口宽/高比；3:4 给跳舞走位留余量
         [Range(0.5f, 1f)] public float heightRatio = 0.97f;   // 竖屏窗口高度占屏幕高度比例
 
         public bool Active { get; private set; }
