@@ -9,7 +9,7 @@ namespace DouyinLive
     // F8 随时切换；退出时窗口/字幕/贴合设置全部还原。
     public class PortraitWindowController : MonoBehaviour
     {
-        public KeyCode hotkey = KeyCode.F8;
+        public KeyCode hotkey = KeyCode.F10;   // F8 被原项目 MEValueChanger 占用
         [Range(0.3f, 1f)] public float aspect = 9f / 16f;
         [Range(0.5f, 1f)] public float heightRatio = 0.97f;   // 竖屏窗口高度占屏幕高度比例
 
