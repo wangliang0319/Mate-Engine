@@ -55,10 +55,11 @@ namespace DouyinLive
         [Header("Bubble")]
         public Transform chatContainer;
         public bool transparentBubble = true;   // 只显示文字，不渲染气泡背景
-        public enum BubbleAnchor { Above, Left, Right }
+        public enum BubbleAnchor { Above, Left, Right, FixedTop }
 
         public bool followAvatarHead = true;    // 文字跟随角色
         public BubbleAnchor bubbleAnchor = BubbleAnchor.Right;  // 默认在角色右侧
+        [Range(0.5f, 0.99f)] public float fixedTopRatio = 0.92f; // FixedTop：字幕线在窗口高度的位置
         public float headClearance = 0.05f;     // 头骨上方的世界空间偏移(米)
         public float sideClearance = 0.18f;     // 侧边模式：距头部中线的世界偏移(米)
         public Vector2 followOffset = new Vector2(0f, 0f);  // 额外像素偏移
@@ -119,42 +120,54 @@ namespace DouyinLive
             }
         }
 
-        // 弹幕文字锚定在角色头顶上方
+        // 弹幕文字定位：跟随角色头部/侧边，或固定字幕区（竖屏直播）
         void FollowHead()
         {
             if (!followAvatarHead || activeBubble == null) return;
-            if (headBone == null || uiCam == null) return;
             var canvasRT = chatContainer as RectTransform;
             if (canvasRT == null) return;
 
-            float scale = Mathf.Max(0.2f, headBone.lossyScale.magnitude);
-            Vector3 anchorWorld;
+            Vector3 screen;
             Vector2 pivot;
-            switch (bubbleAnchor)
-            {
-                case BubbleAnchor.Left:
-                    // 屏幕视角的左侧 = 相机 right 的负方向
-                    anchorWorld = headBone.position - uiCam.transform.right * sideClearance * scale;
-                    pivot = new Vector2(1f, 0.5f);   // 右边缘贴角色，文字向左伸展
-                    break;
-                case BubbleAnchor.Right:
-                    anchorWorld = headBone.position + uiCam.transform.right * sideClearance * scale;
-                    pivot = new Vector2(0f, 0.5f);   // 左边缘贴角色，文字向右伸展
-                    break;
-                default:
-                    anchorWorld = headBone.position + Vector3.up * headClearance * scale;
-                    pivot = new Vector2(0.5f, 0f);   // 底边中心，向上增长
-                    break;
-            }
-            Vector3 screen = uiCam.WorldToScreenPoint(anchorWorld);
-            if (screen.z <= 0f) return; // 头在相机后方，保持原位
 
-            // 钳制在窗口内（窄窗口/角色贴边时文字不出界）
-            float halfW = bubbleWidth * 0.55f;
-            float minX = pivot.x >= 1f ? halfW * 2f + 20f : (pivot.x > 0f ? halfW : 20f);
-            float maxX = pivot.x <= 0f ? Screen.width - halfW * 2f - 20f : (pivot.x < 1f ? Screen.width - halfW : Screen.width - 20f);
-            if (minX < maxX) screen.x = Mathf.Clamp(screen.x, minX, maxX);
-            screen.y = Mathf.Clamp(screen.y, 60f, Screen.height - 120f);
+            if (bubbleAnchor == BubbleAnchor.FixedTop)
+            {
+                // 固定字幕区：窗口顶部横向居中，文字向下伸展（不跟随角色，永不遮脸）
+                screen = new Vector3(Screen.width * 0.5f, Screen.height * fixedTopRatio, 1f);
+                pivot = new Vector2(0.5f, 1f);
+            }
+            else
+            {
+                if (headBone == null || uiCam == null) return;
+
+                float scale = Mathf.Max(0.2f, headBone.lossyScale.magnitude);
+                Vector3 anchorWorld;
+                switch (bubbleAnchor)
+                {
+                    case BubbleAnchor.Left:
+                        // 屏幕视角的左侧 = 相机 right 的负方向
+                        anchorWorld = headBone.position - uiCam.transform.right * sideClearance * scale;
+                        pivot = new Vector2(1f, 0.5f);   // 右边缘贴角色，文字向左伸展
+                        break;
+                    case BubbleAnchor.Right:
+                        anchorWorld = headBone.position + uiCam.transform.right * sideClearance * scale;
+                        pivot = new Vector2(0f, 0.5f);   // 左边缘贴角色，文字向右伸展
+                        break;
+                    default:
+                        anchorWorld = headBone.position + Vector3.up * headClearance * scale;
+                        pivot = new Vector2(0.5f, 0f);   // 底边中心，向上增长
+                        break;
+                }
+                screen = uiCam.WorldToScreenPoint(anchorWorld);
+                if (screen.z <= 0f) return; // 头在相机后方，保持原位
+
+                // 钳制在窗口内（窄窗口/角色贴边时文字不出界）
+                float halfW = bubbleWidth * 0.55f;
+                float minX = pivot.x >= 1f ? halfW * 2f + 20f : (pivot.x > 0f ? halfW : 20f);
+                float maxX = pivot.x <= 0f ? Screen.width - halfW * 2f - 20f : (pivot.x < 1f ? Screen.width - halfW : Screen.width - 20f);
+                if (minX < maxX) screen.x = Mathf.Clamp(screen.x, minX, maxX);
+                screen.y = Mathf.Clamp(screen.y, 60f, Screen.height - 120f);
+            }
 
             var rt = activeBubble.GetRectTransform();
             // 屏幕坐标 → chatContainer 本地坐标

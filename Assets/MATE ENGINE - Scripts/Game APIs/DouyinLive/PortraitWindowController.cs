@@ -59,8 +59,8 @@ namespace DouyinLive
             uniWin.windowSize = new Vector2(w, h);
             uniWin.windowPosition = new Vector2((screenW - w) / 2f, (screenH - h) / 2f);
 
-            // 窄窗口里侧边字幕会被裁掉，切到头顶模式
-            if (speech != null) speech.bubbleAnchor = SpeechPipeline.BubbleAnchor.Above;
+            // 竖屏直播：字幕固定在窗口顶部字幕区（跟随头部在窄窗里容易与角色重叠）
+            if (speech != null) speech.bubbleAnchor = SpeechPipeline.BubbleAnchor.FixedTop;
 
             StartCoroutine(CenterAvatar());
             Active = true;
