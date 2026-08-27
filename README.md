@@ -42,28 +42,85 @@
 
 ### 配置
 
-配置文件：`C:\用户\<你>\AppData\LocalLow\Shinymoon\MateEngineX\settings.json`（修改前先关闭程序）
+配置文件：`C:\用户\<你>\AppData\LocalLow\Shinymoon\MateEngineX\settings.json`
+**修改前必须先关闭程序**（程序退出时会用内存中的旧值覆盖文件）。
 
-```jsonc
-"enableDouyinLive": true,
-"aiBaseUrl": "https://api.xxx.com/v1",   // OpenAI 兼容地址
-"aiApiKey": "sk-...",
-"aiModel": "qwen3-30b-a3b-instruct-2507",
-"ttsProvider": 0,                         // 云端 TTS（复用上面的地址和 Key）
-"ttsModel": "gpt-4o-mini-tts",
-"ttsVoice": "shimmer",
-"douyinPortraitWindow": true,             // 竖屏直播窗口
-"douyinIdleSongList": ["赤伶", "游山恋"]  // 冷场自动唱歌歌单
-```
+#### 总开关与连接
 
-同目录下的个性化文件（首次运行自动生成）：
+| 配置项 | 推荐值 | 说明 |
+|---|---|---|
+| `enableDouyinLive` | `true` | 直播互动总开关 |
+| `douyinWsUrl` | `"ws://127.0.0.1:8888"` | 弹幕抓取器推送地址，改过抓取器端口才需要动 |
 
-| 文件 | 用途 |
+#### 大模型（AI 回复）
+
+| 配置项 | 推荐值 | 说明 |
+|---|---|---|
+| `aiBaseUrl` | `"https://xxx/v1"` | OpenAI 兼容地址，**结尾一般要带 /v1** |
+| `aiApiKey` | `"sk-..."` | 明文存储，注意直播时不要展示此文件 |
+| `aiModel` | `"qwen3-30b-a3b-instruct-2507"` | 实测最快（1.2秒）且中文自然；`deepseek-chat` 亦可 |
+| `aiFallbackToLocal` | `true` | 云端失败时降级本地 LLMUnity，断网不哑场 |
+| `douyinLivePrompt` | `""` | 追加人设（完整人设请用 douyin_persona.json） |
+
+#### 语音 TTS
+
+| 配置项 | 推荐值 | 说明 |
+|---|---|---|
+| `ttsProvider` | `0` | 0=云端 OpenAI 兼容；1=EdgeTTS（**已被微软封禁勿用**）；3=纯字幕无语音 |
+| `ttsBaseUrl` / `ttsApiKey` | `""` | 留空自动复用 aiBaseUrl / aiApiKey |
+| `ttsModel` | `"gpt-4o-mini-tts"` | 实测 1.6 秒返回，支持风格指令 |
+| `ttsVoice` | `"shimmer"` | 甜美女声；候选 coral / nova / sage |
+| `ttsInstructions` | 见下 | **消除中文洋腔的关键**，示例："你是一个20岁左右的中国甜美少女主播，声音清脆软糯、音调偏高，语气活泼带一点撒娇，说标准普通话，绝对不能有外国口音" |
+| `ttsVolume` / `ttsSpeed` | `1.0` / `1.0` | 音量 / 语速 |
+| `lipSyncGain` | `1.0` | 口型幅度，嘴张不开调大 |
+
+#### 互动行为
+
+| 配置项 | 推荐值 | 说明 |
+|---|---|---|
+| `douyinWelcomeEnabled` | `true` | 进房/关注/分享欢迎 |
+| `douyinWelcomeCooldown` | `8.0` | 欢迎冷却秒数，人多的直播间可调到 15 |
+| `douyinAIReplyEnabled` | `true` | AI 弹幕回复 |
+| `douyinAIReplyMinInterval` | `8.0` | 两次回复最小间隔秒数；弹幕多调大（10~15），弹幕少调小（5） |
+| `douyinLikeReactEnabled` | `true` | 点赞感谢（有赞就谢，15 秒冷却合并） |
+| `douyinLikeThreshold` | `100` | 合并批量超过该值时改播总数而非点名 |
+| `douyinGiftEnabled` | `true` | 礼物三档庆祝 + 点歌/换角色命令 |
+| `douyinBigHeadReaction` | `true` | 关注/礼物时大头特写致谢 |
+
+#### 冷场暖场
+
+| 配置项 | 推荐值 | 说明 |
+|---|---|---|
+| `douyinIdleChatterEnabled` | `true` | 冷场自动暖场（求赞/求关注/闲聊轮换） |
+| `douyinIdleThreshold` | `90.0` | 多少秒无互动算冷场 |
+| `douyinIdleAutoSongEnabled` | `true` | 深度冷场自动唱歌 |
+| `douyinIdleAutoSongThreshold` | `300.0` | 冷场多少秒后开唱（测试时可临时改 30） |
+| `douyinIdleSongList` | 默认18首古风 | 自动唱歌歌单，直接增删歌名；空数组=不自动唱 |
+
+#### 竖屏直播窗口
+
+| 配置项 | 推荐值 | 说明 |
+|---|---|---|
+| `douyinPortraitWindow` | `true` | 开播自动切竖屏窗口；F10 手动切换 |
+| `douyinPortraitAspect` | `0.75` | 窗口宽/高比。0.5625=严格9:16；**跳舞走位出画就调大**（0.85~1.0）；配合"角色缩小60~70%+舞台背景"的布局效果最佳 |
+
+#### 个性化数据文件（同目录，首次运行自动生成）
+
+| 文件 | 说明 |
 |---|---|
-| `douyin_persona.json` | 人设卡：名字/性格/背景/口头禅/禁忌话题 |
-| `douyin_blocked_words.txt` | 敏感词表，AI 输出含词即静默（直播合规） |
-| `douyin_audience.json` | 观众记忆（自动维护） |
-| `douyin_gift_rules.json` | 礼物 → 动作规则 |
+| `douyin_persona.json` | **人设卡**：name(名字)/identity(身份)/personality(性格)/background(背景)/catchphrases(口头禅)/taboos(禁忌话题)/speakingStyle(说话风格)，AI 人格的核心来源 |
+| `douyin_blocked_words.txt` | 敏感词表（一行一词，# 开头为注释）。AI 输出含词即静默丢弃，挑衅弹幕不接茬——**直播合规，建议按需补充** |
+| `douyin_audience.json` | 观众记忆（自动维护勿手改）：来访次数/礼物总额/最近弹幕 |
+| `douyin_gift_rules.json` | 礼物规则：`{"giftName":"玫瑰","minDiamond":0,"minCount":1,"action":"randomDance"}`，action 可选 `thanks`/`randomDance`/`builtinDance`/`dance:舞名` |
+
+#### 程序内快捷键
+
+| 按键 | 功能 |
+|---|---|
+| `F10` | 竖屏直播窗口开/关 |
+| `B` | 大头模式开/关（原生功能，直播中窗口尺寸不变） |
+| `F1` | 径向菜单（原生） |
+| `F8` | 数值调试面板（原生，误按再按一次关闭） |
 
 ### 离线测试（不开直播）
 
