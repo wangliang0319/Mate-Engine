@@ -119,6 +119,8 @@ namespace DouyinLive
             danmakuAI.Cloud = cloudBackend;
             danmakuAI.Local = localBackend;
             danmakuAI.FallbackToLocal = d.aiFallbackToLocal;
+            danmakuAI.Persona = PersonaCard.LoadOrCreate();   // douyin_persona.json
+            ContentFilter.Load();                             // douyin_blocked_words.txt
 
             idleChatter.Speech = speech;
             idleChatter.AI = danmakuAI;

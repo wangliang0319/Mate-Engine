@@ -20,6 +20,7 @@ namespace DouyinLive
         public IChatBackend Cloud;
         public IChatBackend Local;
         public bool FallbackToLocal = true;
+        public PersonaCard Persona;          // 人设卡（douyin_persona.json）
 
         public int RepliedCount { get; private set; }
 
@@ -38,10 +39,29 @@ namespace DouyinLive
         static readonly Regex EmojiOnly = new Regex(@"^[\s\p{So}\p{Sk}\[\]【】]+$", RegexOptions.Compiled);
 
         string SystemPrompt =>
-            "你是一个桌面宠物虚拟主播，正在抖音直播。观众会发弹幕，你要用活泼、简短、口语化的中文回应。" +
+            (Persona != null ? Persona.ToPromptSection() : "你是一个桌面宠物虚拟主播。") +
+            "你正在抖音直播，观众会发弹幕，你要活泼简短地回应。" +
             "规则：回复必须精简，一般一句话，最多不超过30个字；不要使用表情符号、颜文字、markdown或任何特殊符号；" +
-            "语气亲切自然，适合直接朗读出来；直接说内容，不要加引号或前缀。" +
-            (string.IsNullOrEmpty(ExtraPersona) ? "" : ("你的人设补充：" + ExtraPersona));
+            "适合直接朗读出来；直接说内容，不要加引号或前缀；不聊政治宗教等敏感话题。" +
+            (string.IsNullOrEmpty(ExtraPersona) ? "" : ("补充设定：" + ExtraPersona));
+
+        // 快捷反应：高频弹幕不走 LLM，秒回且省钱
+        static readonly (Regex pattern, string[] replies)[] QuickReplies =
+        {
+            (new Regex(@"^6+$|^666+", RegexOptions.Compiled), new[]
+                { "谢谢宝子的666，我会更努力的~", "666收到，你们也很棒！", "嘿嘿，谢谢夸奖~" }),
+            (new Regex(@"^哈+$|^(哈哈)+哈*$|^233+$", RegexOptions.Compiled), new[]
+                { "被你们笑得我也想笑了~", "开心就好呀哈哈~", "笑什么呢，带我一个~" }),
+            (new Regex(@"^(主播|宝宝|小姐姐)?(你好|您好|hi|hello|哈喽|嗨)$", RegexOptions.Compiled | RegexOptions.IgnoreCase), new[]
+                { "你好呀，欢迎欢迎~", "哈喽哈喽，很高兴见到你~", "嗨，来啦就别走啦~" }),
+            (new Regex(@"^(晚安|睡了|下了|溜了|拜拜|再见|88)$", RegexOptions.Compiled), new[]
+                { "晚安好梦，明天再来看我哦~", "拜拜，路上小心，记得想我~", "下次见啦，爱你~" }),
+            (new Regex(@"^在吗?[?？]?$", RegexOptions.Compiled), new[]
+                { "在的在的，一直都在~", "我在呀，怎么啦~" }),
+            (new Regex(@"^(好可爱|太可爱了|可爱)$", RegexOptions.Compiled), new[]
+                { "嘿嘿，人家会害羞的啦~", "你眼光真好~", "可爱担当就是我！" }),
+        };
+        float lastQuickReplyAt = -999f;
 
         public void MarkGifter(string userId)
         {
@@ -54,6 +74,20 @@ namespace DouyinLive
             var text = (ev.Content ?? "").Trim();
             if (text.Length < 2) return;
             if (EmojiOnly.IsMatch(text)) return;
+
+            // 快捷反应：高频弹幕直接秒回（带20秒冷却防复读）
+            foreach (var (pattern, replies) in QuickReplies)
+            {
+                if (!pattern.IsMatch(text)) continue;
+                if (Time.unscaledTime - lastQuickReplyAt < 20f) return;  // 冷却中直接吞掉
+                lastQuickReplyAt = Time.unscaledTime;
+                Speech?.Enqueue(replies[UnityEngine.Random.Range(0, replies.Length)],
+                    SpeechPipeline.Priority.AIReply, 20f);
+                return;
+            }
+
+            // 敏感弹幕不接茬（不回复即不给节奏）
+            if (!ContentFilter.IsSafe(text)) return;
 
             // 60秒重复内容不回
             if (recentSet.Contains(text)) return;
@@ -132,6 +166,12 @@ namespace DouyinLive
 
                 reply = Sanitize(reply);
                 if (string.IsNullOrEmpty(reply)) return;
+                // 合规：AI 输出含敏感词直接不播（宁可不说不能说错）
+                if (!ContentFilter.IsSafe(reply))
+                {
+                    Debug.LogWarning("[DanmakuAI] Reply blocked by content filter");
+                    return;
+                }
 
                 history.Add(new ChatMsg("user", userMsg));
                 history.Add(new ChatMsg("assistant", reply));
