@@ -16,8 +16,11 @@
    效果组合，改 `douyin_triggers.json` 存盘即生效，不用重新出包。
 2. **效果可扩展。** 效果用字符串 ID 寻址。以后往 Animator 里加了新动画，只改
    json 就能用上，不改代码。
-3. **落地 `new.md` 的三层动作模型。** L1 轻叠加 / L2 普通互动 / L3 重磅独占，
-   带冷却、唱歌保护、以及「弹幕不能触发 L3」的硬规则。
+3. **三层动作模型。** L1 轻叠加 / L2 普通互动 / L3 重磅独占，带冷却、唱歌保护和
+   多级限流。
+
+`Docs/new.md` 是需求的出发点，但只作参考、不逐条照搬；与代码现状冲突或有更好解法的
+地方，本设计按自己的判断处理，并在对应小节写明理由。
 
 顺带把跳舞玩法做起来：不重复轮播、冷场接舞、跳舞期间的表演增强。
 
@@ -154,16 +157,19 @@ DouyinLiveManager.Route()
 {
   "version": 1,
   "global": {
-    "chatCooldown": 1.0,        // 弹幕触发全局冷却（秒）
+    "chatCooldown": 0.5,        // 弹幕触发全局冷却（秒）
     "likeCooldown": 3.0,        // 点赞触发全局冷却
     "giftCooldown": 1.2,        // 礼物触发全局冷却
-    "allowChatL3": false,       // new.md 硬规则：弹幕不能炸大效果
+    "perUserCooldown": 5.0,     // 同一观众两次触发的最小间隔（防单人刷屏，见 §6.1）
+    "l2MinInterval": 3.0,       // 两次 L2 的最小间隔
+    "l3MinInterval": 45.0,      // 两次 L3 的最小间隔（防大效果连环炸）
+    "l3QueueSize": 3,           // L3 排队上限
     "l3InterruptSinging": false,// L3 是否可以打断正在唱的歌
     "giftUseTotalValue": true   // true=单价×数量 false=只看单价
   },
   "rules": [
     {
-      "id": "pat",                       // 唯一标识，仅用于日志和冷却记账
+      "id": "pat",                       // 唯一标识，用于日志和冷却记账
       "enabled": true,
       "source": "chat",                  // chat|like|follow|gift|enter|share
       "keywords": ["拍头", "敲脑袋", "摸头"],
@@ -171,6 +177,7 @@ DouyinLiveManager.Route()
       "pick": "all",                     // all=全执行 random=随机选一个
       "level": "L1",                     // L1|L2|L3
       "cooldown": 0,                     // 本规则独立冷却，0=只受全局冷却
+      "perUserCooldown": -1,             // 覆盖 global.perUserCooldown，-1=跟随全局
       "sayFallback": ""                  // 可选：本规则里的 sayAI: 失败时改说这句
     }
   ]
@@ -194,6 +201,8 @@ DouyinLiveManager.Route()
 - `enabled: false` 的规则在匹配时直接跳过（方便临时关掉某个玩法而不删配置）。
 - 弹幕规则未命中时，事件继续交给现有的 `RewardService.TryHandleDanmaku` →
   `DanmakuAIService.OnDanmaku`，AI 回复功能完全不受影响。
+- **`点歌` / `换角色` / `菜单` 会被默认规则接管，不会再走到 `TryHandleDanmaku`**
+  （命中即 return）。删掉这三条规则则自动退回旧路径，两条路不会同时执行。
 
 ### 5.3 热重载与容错
 
@@ -206,35 +215,35 @@ DouyinLiveManager.Route()
 
 ### 5.4 默认规则集
 
-默认配置按 `new.md` 落地，并对没有动画资源的动作做近似映射（注释里标 `占位`）：
+对没有动画资源的动作做近似映射（注释里标 `占位`）：
 
 ```jsonc
 // 弹幕 L1
-{ "source":"chat", "keywords":["拍头","敲脑袋","摸头"], "effects":["anim:Headpat"],          "level":"L1" },
-{ "source":"chat", "keywords":["捋头发","顺毛"],         "effects":["anim:HairStroke"],       "level":"L1" },
-{ "source":"chat", "keywords":["捏脸","戳脸","挠痒痒"],   "effects":["anim:HoverFaceTrigger","mood:happy"], "level":"L1" }, // 占位：等专属动画
+{ "id":"pat",    "source":"chat", "keywords":["拍头","敲脑袋","摸头"], "effects":["anim:Headpat"],    "level":"L1" },
+{ "id":"hair",   "source":"chat", "keywords":["捋头发","顺毛"],         "effects":["anim:HairStroke"], "level":"L1" },
+{ "id":"face",   "source":"chat", "keywords":["捏脸","戳脸","挠痒痒"],   "effects":["anim:HoverFaceTrigger","mood:happy"], "level":"L1" }, // 占位：等专属动画
 // 弹幕 L2（当前全部为占位映射）
-{ "source":"chat", "keywords":["飞吻","么么","抱抱"],     "effects":["anim:HoverFaceTrigger","mood:love","particle:Dance Trail Blue"], "level":"L2" },
-{ "source":"chat", "keywords":["挥手","你好","打招呼"],   "effects":["anim:HoverTrigger"],     "level":"L2" },
+{ "id":"love",   "source":"chat", "keywords":["飞吻","么么","抱抱"],     "effects":["anim:HoverFaceTrigger","mood:love","particle:Dance Trail Blue"], "level":"L2" },
+{ "id":"wave",   "source":"chat", "keywords":["挥手","你好","打招呼"],   "effects":["anim:HoverTrigger"], "level":"L2" },
 // 弹幕特殊指令
-{ "source":"chat", "keywords":["菜单","玩法"],           "effects":["menu"] },
-{ "source":"chat", "keywords":["点歌"],                  "effects":["song:request"] },
-{ "source":"chat", "keywords":["换角色","换装","换个人"], "effects":["swapAvatar"], "level":"L3" },  // allowChatL3=false 时默认不生效
+{ "id":"menu",   "source":"chat", "keywords":["菜单","玩法"],           "effects":["menu"] },
+{ "id":"song",   "source":"chat", "keywords":["点歌"],                  "effects":["song:request"] },
+{ "id":"swap",   "source":"chat", "keywords":["换角色","换装","换个人"], "effects":["swapAvatar"], "level":"L3", "cooldown":60, "perUserCooldown":180 },
+{ "id":"reqdan", "source":"chat", "keywords":["点舞","跳舞","来一段"],    "effects":["dance:random"], "level":"L3", "cooldown":90, "perUserCooldown":300 },
 // 点赞
-{ "source":"like", "everyN":30,     "effects":["anim:Headpat","anim:HairStroke","anim:HoverFaceTrigger"], "pick":"random", "level":"L1" },
-{ "source":"like", "milestone":3000,"effects":["face:Happy","particle:Dance Trail Blue","say:哇！我们已经破三千赞啦，谢谢家人们！"], "level":"L2" },
+{ "id":"like30",   "source":"like", "everyN":30,     "effects":["anim:Headpat","anim:HairStroke","anim:HoverFaceTrigger"], "pick":"random", "level":"L1" },
+{ "id":"like3000", "source":"like", "milestone":3000,"effects":["face:Happy","particle:Dance Trail Blue","say:哇！我们已经破三千赞啦，谢谢家人们！"], "level":"L2" },
 // 关注
-{ "source":"follow", "effects":["bigscreen","particle:Dance Trail Blue","say:感谢 {u} 的关注，欢迎来到直播间！"], "level":"L3" },
+{ "id":"follow", "source":"follow", "effects":["bigscreen","particle:Dance Trail Blue","say:感谢 {u} 的关注，欢迎来到直播间！"], "level":"L3" },
 // 礼物三档（阈值按实际直播间调）
-{ "source":"gift", "maxDiamond":9,   "effects":["anim:Headpat","anim:HairStroke"], "pick":"random", "level":"L1" },
-{ "source":"gift", "minDiamond":10, "maxDiamond":99, "effects":["face:Happy","particle:Dance Trail Blue"],   "level":"L2" },
-{ "source":"gift", "minDiamond":100, "effects":["bigscreen","dance:random","sayAI:观众{u}送了{g}，用一句话热情感谢并说要跳舞回报"], "level":"L3" }
+{ "id":"gift1", "source":"gift", "maxDiamond":9,   "effects":["anim:Headpat","anim:HairStroke"], "pick":"random", "level":"L1" },
+{ "id":"gift2", "source":"gift", "minDiamond":10, "maxDiamond":99, "effects":["face:Happy","particle:Dance Trail Blue"], "level":"L2" },
+{ "id":"gift3", "source":"gift", "minDiamond":100, "effects":["bigscreen","dance:random","sayAI:观众{u}送了{g}，用一句话热情感谢并说要跳舞回报"], "level":"L3" }
 ```
 
-> `换角色` 这条默认写成 L3 且 `allowChatL3: false`，意味着**开箱即用时弹幕换角色是关的**。
-> 用户想开只需把 `allowChatL3` 改 true，或把这条规则的 `level` 改成 `L2`。
-> 这与现有行为（弹幕可以换角色，30 秒冷却）不同 —— 这是一处**行为变更**，
-> 需要在 README 显式说明。
+> **弹幕可以触发 L3。** `换角色` / `点舞` 默认就是 L3 且开箱可用，与现有行为一致
+> （现在弹幕本来就能换角色）。防刷屏靠 §6.1 的多级限流，不靠禁止 —— 理由见那一节。
+> 换角色的规则冷却设为 60 秒（现有硬编码是 30 秒），并加了 180 秒的单人冷却。
 
 ### 5.5 礼物档位说明
 
@@ -245,27 +254,53 @@ DouyinLiveManager.Route()
   适合人气低、以小礼物为主的直播间——刷得多也能看到升级反馈。
 - `false`（`new.md` 口径）：只看单价，20 个小心心仍然是 L1。适合防止刷屏炸效果。
 
-## 6. ActionDirector：分层仲裁
-
-按 `new.md` 的三层模型实现，行为定义如下：
+## 6. ActionDirector：分层仲裁与限流
 
 | 层级 | 打断规则 | 唱歌时 | 冷却 |
 |---|---|---|---|
-| L1 | 不打断任何东西，可与其它 L1 叠加 | **正常播放** | 全局源冷却 + 规则冷却 |
-| L2 | 打断闲聊（`IdleChatterService` 的暖场话），不打断唱歌/跳舞 | **降级为只执行 `particle:` / `mood:` 效果，不播动画** | 同上，另加 L2 最小间隔 |
-| L3 | 独占；执行期间拒绝新的 L3（改为排队） | 由 `l3InterruptSinging` 决定；false 则排队等唱完 | 同上，另加 L3 最小间隔 |
+| L1 | 不打断任何东西，可与其它 L1 叠加 | **正常播放** | 源冷却 + 规则冷却 + 单人冷却 |
+| L2 | 打断闲聊（`IdleChatterService` 的暖场话），不打断唱歌/跳舞 | **降级为只执行 `particle:` / `mood:` 效果，不播动画** | 同上，另加 `l2MinInterval` |
+| L3 | 独占；执行期间的新 L3 进队列 | 由 `l3InterruptSinging` 决定；false 则排队等唱完 | 同上，另加 `l3MinInterval` |
 
-要点：
+### 6.1 为什么不用「弹幕不能触发 L3」这条硬规则
+
+`new.md` 原稿写了这条禁令，本设计**不采用**。理由：
+
+- 它把手段当成了目的。真正要防的是「大效果被连环炸、画面一直被占」，而不是
+  「弹幕这个来源有罪」。禁掉整个来源，代价是弹幕永远玩不了直播间最有看头的
+  换角色和点舞 —— 而这恰恰是低人气直播间最需要的、零成本的观众参与点。
+- 现有代码本来就允许弹幕换角色（`RewardService.TryHandleDanmaku` → 30 秒冷却），
+  加这条禁令等于做功能倒退。
+- 同理，`new.md` 的「弹幕全局冷却 1 秒」也是钝器：一个人狂刷会连带把所有人的
+  互动一起冻住，惩罚了无辜观众。
+
+**替代方案：四道限流闸，逐层收紧。** 一个请求要执行必须全部通过：
+
+1. **源冷却**（`chatCooldown` / `likeCooldown` / `giftCooldown`）——防止整体节奏过密。
+   弹幕默认从 1.0 降到 0.5 秒，因为下面三道闸更对症，这一道不需要那么狠。
+2. **单人冷却**（`perUserCooldown`，默认 5 秒，可按规则覆盖）——按 `DouyinEvent.UserId`
+   记账。**这是防刷屏的主力**：一个人狂刷只冻结他自己，别人照常玩。
+3. **规则冷却**（`cooldown`）——单个玩法自己的节奏。换角色 60 秒、点舞 90 秒。
+4. **层级最小间隔**（`l2MinInterval` / `l3MinInterval`）——跨规则的总闸。
+   `l3MinInterval` 默认 45 秒，意味着无论多少人刷什么词，重磅效果之间至少隔 45 秒。
+
+被限流拦下的请求**直接丢弃**（L3 除外，见下），并在 debug 日志里写明是哪道闸拦的
+—— 调玩法时能一眼看出该调哪个参数。
+
+`UserId` 缺失（部分事件可能没有）时，单人冷却退化为不限制，其余三道闸照常生效。
+
+### 6.2 其它要点
 
 - **L3 排队而不是丢弃。** 大哥连刷礼物时，丢弃会让观众只看到一次效果，体验很差。
-  队列上限 3 条，超出丢最旧的，避免积压到几分钟后才播。
-- **弹幕 L3 硬拦截。** `source == "chat"` 且 `level == "L3"` 且 `!allowChatL3` →
-  直接丢弃并在 debug 日志里说明原因。这是 `new.md` 的硬规则。
+  队列长度 `l3QueueSize`（默认 3），超出丢**最旧**的 —— 宁可少播一次，也不要观众
+  等了几分钟才看到自己的效果。同一 `id` 的 L3 在队列里已存在时不重复入队。
 - **判定「正在唱歌」** 用 `SongService.IsPlaying`；「正在跳舞」用
   `AvatarDanceHandler.IsPlaying`。
 - **时间源可注入。** `ActionDirector` 内部不直接调 `Time.unscaledTime`，而是通过一个
   `Func<float> Now`（默认指向 `Time.unscaledTime`），这样冷却逻辑可以在 EditMode
   测试里跑而不需要进播放模式。
+- **单人冷却的记账表要清理。** 按 `UserId` 存最后触发时间的字典，长时间直播会无限
+  增长。每 5 分钟清一次超过 10 分钟没活动的条目。
 
 ## 7. DanceDirector：跳舞增强
 
@@ -326,7 +361,7 @@ DouyinLiveManager.Route()
 | `DouyinLiveManager.cs` | `Route()` 前置 `TriggerRouter` 匹配；持有并初始化新组件；`ApplySettings` 里接线；`TriggerBigHeadMoment` 改为 public 供 `EffectRegistry` 调用 |
 | `RewardService.cs` | `SwitchRandomAvatar` 改 public；`TryPlayRandomCustom` 的随机选舞委托给 `DanceDirector`；礼物档位文案保留为 `sayAI` 的回落 |
 | `IdleChatterService.cs` | 深度冷场增加跳舞分支（唱/跳交替） |
-| `README.md` | 新增 `douyin_triggers.json` 说明；标注「弹幕换角色默认关闭」的行为变更 |
+| `README.md` | 新增 `douyin_triggers.json` 说明与限流参数调节指南 |
 | `Docs/DouyinLive-Integration.md` | 补充新架构的数据流 |
 
 ### 不动
@@ -356,7 +391,8 @@ Unity 的约束是：`Assembly-CSharp` 自动引用所有 asmdef，所以**测�
    - 顺序优先：更具体的规则在前时确实先命中
    - `everyN` 跨事件累计、`milestone` 只触发一次
    - 礼物档位边界（9/10/99/100），`giftUseTotalValue` 两种口径
-   - `allowChatL3 = false` 时弹幕 L3 被拦截
+   - 四道限流闸各自独立生效：注入假时钟，验证单人冷却只冻结该 UserId、
+     `l3MinInterval` 跨规则生效、`UserId` 为空时退化为不限制
    - 冷却：注入假时钟验证全局冷却与规则冷却互不干扰
    - 坏 json（缺字段、类型错、语法错）不抛异常且保留旧配置
 4. **不做单元测试的部分**：`EffectRegistry` 的执行、`DanceDirector`、
