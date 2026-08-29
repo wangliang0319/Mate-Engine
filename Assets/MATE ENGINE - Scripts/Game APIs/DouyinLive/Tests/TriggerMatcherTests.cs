@@ -91,6 +91,17 @@ namespace DouyinLive.Tests
             Assert.IsNull(TriggerMatcher.Match(ev, cfg, new MatchContext { LikeTotalBefore = 3005, LikeTotalAfter = 3015 }));
         }
 
+        // 点赞没有 chat 那样的下游回落消费者，所以「省略即不限」（spec §5.1）
+        // 在这里是刻意设计，不是漏加的守卫：不写 everyN/milestone 的点赞规则
+        // 就是有意的兜底，应当命中每一次点赞。
+        [Test]
+        public void 无条件的点赞规则是有意的兜底会命中所有点赞()
+        {
+            var cfg = Cfg(new TriggerRule { id = "catchall", source = "like", effects = new List<string> { "menu" } });
+            var ev = new DouyinEvent { Type = DouyinMsgType.Like, LikeCount = 1 };
+            Assert.AreEqual("catchall", TriggerMatcher.Match(ev, cfg, new MatchContext { LikeTotalBefore = 0, LikeTotalAfter = 1 })?.id);
+        }
+
         // ---- 礼物 ----
 
         [Test]
@@ -121,6 +132,16 @@ namespace DouyinLive.Tests
             var rule = new TriggerRule { id = "rose", source = "gift", giftName = "玫瑰", effects = new List<string> { "menu" } };
             Assert.AreEqual("rose", TriggerMatcher.Match(Gift(1, 1, "玫瑰"), Cfg(rule), new MatchContext())?.id);
             Assert.IsNull(TriggerMatcher.Match(Gift(1, 1, "棒棒糖"), Cfg(rule), new MatchContext()));
+        }
+
+        // 礼物同样没有下游回落消费者，「省略即不限」（spec §5.1）在这里也是刻意设计：
+        // 不写任何条件字段的礼物规则就是有意的兜底，应当命中任意一份礼物，
+        // 可用来在规则数组末尾写「其它礼物都这样处理」。
+        [Test]
+        public void 无条件的礼物规则是有意的兜底会命中所有礼物()
+        {
+            var cfg = Cfg(new TriggerRule { id = "catchall", source = "gift", effects = new List<string> { "menu" } });
+            Assert.AreEqual("catchall", TriggerMatcher.Match(Gift(1, 1, "随便什么礼物"), cfg, new MatchContext())?.id);
         }
 
         // ---- 无条件来源 ----

@@ -60,6 +60,10 @@ namespace DouyinLive
         // 关键词包含匹配（忽略大小写）或正则任一命中即算命中。
         // 两个条件都没写的弹幕规则永远不命中 —— 否则它会吞掉所有弹幕，
         // 让 AI 回复永远不生效，而这种配置几乎肯定是写漏了。
+        // 这一点弹幕和点赞/礼物不同：弹幕未命中要继续走到
+        // RewardService.TryHandleDanmaku → DanmakuAIService.OnDanmaku（spec §5.2），
+        // 空条件弹幕规则会把这条回落路径永久堵死；点赞/礼物没有这个下游消费者，
+        // 「省略即不限」对它们是安全且刻意的（见下方 MatchesLike/MatchesGift）。
         static bool MatchesChat(TriggerRule r, string content)
         {
             if (r.keywords != null)
@@ -80,6 +84,10 @@ namespace DouyinLive
             return false;
         }
 
+        // 点赞没有下游回落路径（不像弹幕要留给 AI 回复，spec §5.2），
+        // 所以「省略即不限」（spec §5.1）在这里是刻意设计：
+        // 一条不写 everyN/milestone 的点赞规则就是有意的兜底，命中每一次点赞，
+        // 不能照搬 chat 的「空条件永不命中」写法。
         static bool MatchesLike(TriggerRule r, MatchContext ctx)
         {
             if (r.everyN > 0)
@@ -91,6 +99,9 @@ namespace DouyinLive
             return true;   // 没写条件 = 每次点赞都命中
         }
 
+        // 礼物同样没有下游回落路径，「省略即不限」（spec §5.1）同样是刻意设计：
+        // 不写 giftName/minCount/minDiamond/maxDiamond 的礼物规则就是兜底，
+        // 命中每一份礼物，可用来在数组末尾写「其它礼物都这样处理」这类默认规则。
         static bool MatchesGift(TriggerRule r, DouyinEvent ev, TriggerGlobal g)
         {
             if (!string.IsNullOrEmpty(r.giftName) &&
