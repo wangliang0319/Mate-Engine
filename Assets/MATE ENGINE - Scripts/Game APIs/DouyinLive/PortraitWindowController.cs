@@ -4,12 +4,11 @@ using UnityEngine;
 
 namespace DouyinLive
 {
-    // 竖屏直播模式：把透明桌宠窗口改为 9:16 竖屏窗口（高=屏幕高，水平居中），
+    // 竖屏直播模式：把透明桌宠窗口改为竖屏窗口（高=屏幕高，水平居中），
     // 角色自动移到画面中央，字幕切到头顶模式 —— 适配直播伴侣竖屏画布采集。
-    // F8 随时切换；退出时窗口/字幕/贴合设置全部还原。
+    // 完全由 settings.json 的 douyinPortraitAspect 驱动（>0 开启）；关闭时窗口/字幕/贴合设置全部还原。
     public class PortraitWindowController : MonoBehaviour
     {
-        public KeyCode hotkey = KeyCode.F10;   // F8 被原项目 MEValueChanger 占用
         [Range(0.3f, 1.3f)] public float aspect = 0.75f;      // 窗口宽/高比；3:4 给跳舞走位留余量
         [Range(0.5f, 1f)] public float heightRatio = 0.97f;   // 竖屏窗口高度占屏幕高度比例
 
@@ -19,34 +18,63 @@ namespace DouyinLive
         SpeechPipeline speech;
 
         bool savedFit;
-        Vector2 savedSize, savedPos;
+        Vector2 savedPos;
         SpeechPipeline.BubbleAnchor savedAnchor;
+        bool desktopRestored;
 
         void Start()
         {
-            uniWin = UniWindowController.current != null
-                ? UniWindowController.current
-                : FindFirstObjectByType<UniWindowController>();
-            speech = GetComponent<SpeechPipeline>();
+            Resolve();
         }
 
-        void Update()
+        // DouyinLiveManager 会在自己的 Start() 里 AddComponent 本组件再立刻调用，
+        // 那时本组件的 Start() 还没跑，所以这里按需解析而不是只在 Start 里赋值。
+        void Resolve()
         {
-            if (Input.GetKeyDown(hotkey)) Toggle();
+            if (uniWin == null)
+                uniWin = UniWindowController.current != null
+                    ? UniWindowController.current
+                    : FindFirstObjectByType<UniWindowController>();
+            if (speech == null) speech = GetComponent<SpeechPipeline>();
         }
 
-        public void Toggle()
+        // 关闭竖屏时必须显式改回桌宠尺寸：Unity 会把窗口尺寸存进注册表
+        // (HKCU\Software\Shinymoon\MateEngineX\Screenmanager Resolution *)，
+        // 下次启动直接按上次的竖屏尺寸开窗，而这一次 Active 一直是 false，
+        // ExitPortrait() 的守卫会直接 return，没人把窗口改回来。
+        public void RestoreDesktopWindow()
         {
-            if (Active) ExitPortrait();
-            else EnterPortrait();
+            if (Active) { ExitPortrait(); return; }
+
+            Resolve();
+            if (uniWin == null || desktopRestored) return;
+
+            desktopRestored = true;   // 每次运行只强制一次，之后不干扰用户自己调窗口
+            uniWin.shouldFitMonitor = false;
+            uniWin.windowSize = DesktopWindowSize();
+        }
+
+        // 与 AvatarSettingsMenu.RestoreWindowSize() 保持一致的三档桌宠窗口尺寸
+        static Vector2 DesktopWindowSize()
+        {
+            var state = SaveLoadHandler.Instance != null
+                ? SaveLoadHandler.Instance.data.windowSizeState
+                : SaveLoadHandler.SettingsData.WindowSizeState.Normal;
+
+            switch (state)
+            {
+                case SaveLoadHandler.SettingsData.WindowSizeState.Small: return new Vector2(768, 512);
+                case SaveLoadHandler.SettingsData.WindowSizeState.Big: return new Vector2(2048, 1536);
+                default: return new Vector2(1536, 1024);
+            }
         }
 
         public void EnterPortrait()
         {
+            Resolve();
             if (Active || uniWin == null) return;
 
             savedFit = uniWin.shouldFitMonitor;
-            savedSize = uniWin.windowSize;
             savedPos = uniWin.windowPosition;
             if (speech != null) savedAnchor = speech.bubbleAnchor;
 
@@ -64,19 +92,22 @@ namespace DouyinLive
 
             StartCoroutine(CenterAvatar());
             Active = true;
-            Debug.Log($"[PortraitWindow] ON {w}x{h} —— 直播伴侣按窗口采集本程序即为竖屏画面，F8 退出");
+            Debug.Log($"[PortraitWindow] ON {w}x{h} —— 直播伴侣按窗口采集本程序即为竖屏画面");
         }
 
         public void ExitPortrait()
         {
             if (!Active || uniWin == null) return;
 
-            uniWin.windowSize = savedSize;
+            // 按 windowSizeState 还原，而不是记录"进入竖屏前的尺寸"：如果上次退出时窗口就是竖屏，
+            // Unity 会把竖屏尺寸从注册表带回来，那么记下来的"原尺寸"本身就是个竖屏值。
+            uniWin.windowSize = DesktopWindowSize();
             uniWin.windowPosition = savedPos;
             uniWin.shouldFitMonitor = savedFit;
             if (speech != null) speech.bubbleAnchor = savedAnchor;
 
             Active = false;
+            desktopRestored = true;
             Debug.Log("[PortraitWindow] OFF —— 已还原桌宠窗口");
         }
 

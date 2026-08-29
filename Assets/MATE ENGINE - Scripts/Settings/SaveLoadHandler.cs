@@ -80,6 +80,14 @@ public class SaveLoadHandler : MonoBehaviour
         }
     }
 
+    // Json.NET reuses collections created by the field initializers and APPENDS the values from
+    // disk (ObjectCreationHandling.Auto). Any list with a non-empty default (douyinIdleSongList)
+    // would therefore grow by its default count on every launch. Replace = always start fresh.
+    private static readonly JsonSerializerSettings LoadSettings = new()
+    {
+        ObjectCreationHandling = ObjectCreationHandling.Replace
+    };
+
     // Laden
     public void LoadFromDisk()
     {
@@ -88,7 +96,7 @@ public class SaveLoadHandler : MonoBehaviour
             try
             {
                 string json = File.ReadAllText(FilePath);
-                data = JsonConvert.DeserializeObject<SettingsData>(json);
+                data = JsonConvert.DeserializeObject<SettingsData>(json, LoadSettings);
             }
             catch
             {
@@ -193,8 +201,8 @@ public class SaveLoadHandler : MonoBehaviour
         public bool douyinIdleChatterEnabled = true;
         public float douyinIdleThreshold = 90f;
         public bool douyinBigHeadReaction = true;   // 关注/礼物时大头特写致谢
-        public bool douyinPortraitWindow = false;   // 竖屏直播窗口，F10 可切
-        public float douyinPortraitAspect = 0.75f;  // 竖屏窗口宽高比(宽/高)；跳舞走位多可调大
+        // 竖屏直播窗口宽高比(宽/高)：>0 开启竖屏窗口，<=0 保持普通桌宠窗口；跳舞走位多可调大
+        public float douyinPortraitAspect = 0.75f;
         public bool douyinIdleAutoSongEnabled = true;
         public float douyinIdleAutoSongThreshold = 300f;
         public List<string> douyinIdleSongList = new()
@@ -258,15 +266,42 @@ public class SaveLoadHandler : MonoBehaviour
     //ALARM
     void MigrateAfterLoad()
     {
+        if (data == null) data = new SettingsData();
         if (data.timers == null) data.timers = new List<SettingsData.TimerEntry>();
         if (string.IsNullOrEmpty(data.selectedParticleTheme)) data.selectedParticleTheme = "Standard";
-        if (data == null) data = new SettingsData();
         if (data.alarms == null) data.alarms = new List<SettingsData.AlarmEntry>();
+
+        int versionBefore = data.settingsVersion;
         if (data.settingsVersion < 1)
-        {
             data.settingsVersion = 1;
-            SaveToDisk();
+        bool changed = data.settingsVersion != versionBefore;
+
+        // 老版本每次启动都会把默认歌单再追加一遍（原因见 LoadSettings 注释），已存盘的重复项在此清掉。
+        // 故意不挂 settingsVersion 门槛：历史构建写出过 v2/v3 而当前源码没有对应迁移，
+        // 版本号不可靠，按内容判断才稳。
+        var songs = DedupeStrings(data.douyinIdleSongList);
+        if (data.douyinIdleSongList == null || songs.Count != data.douyinIdleSongList.Count)
+        {
+            data.douyinIdleSongList = songs;
+            changed = true;
         }
+
+        if (changed) SaveToDisk();
+    }
+
+    static List<string> DedupeStrings(List<string> source)
+    {
+        var result = new List<string>();
+        if (source == null) return result;
+
+        var seen = new HashSet<string>();
+        foreach (var item in source)
+        {
+            if (string.IsNullOrWhiteSpace(item)) continue;
+            string name = item.Trim();
+            if (seen.Add(name)) result.Add(name);
+        }
+        return result;
     }
 
     public static void SyncAllowedAppsToAllAvatars()

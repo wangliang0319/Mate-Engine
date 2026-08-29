@@ -148,18 +148,20 @@ namespace DouyinLive
                 if (bigScreen != null) bigScreen.keepWindowSize = true;
             }
 
-            // 竖屏直播窗口（F10 也可随时切换）
+            // 竖屏直播窗口：完全由 douyinPortraitAspect 决定，>0 开启、<=0 保持普通窗口
             var portrait = GetComponent<PortraitWindowController>();
             if (portrait == null) portrait = gameObject.AddComponent<PortraitWindowController>();
-            bool aspectChanged = Mathf.Abs(portrait.aspect - d.douyinPortraitAspect) > 0.01f;
-            portrait.aspect = Mathf.Clamp(d.douyinPortraitAspect, 0.3f, 1.3f);
-            if (d.enableDouyinLive && d.douyinPortraitWindow)
+            bool wantPortrait = d.enableDouyinLive && d.douyinPortraitAspect > 0f;
+            if (wantPortrait)
             {
+                float aspect = Mathf.Clamp(d.douyinPortraitAspect, 0.3f, 1.3f);
+                bool aspectChanged = Mathf.Abs(portrait.aspect - aspect) > 0.01f;
+                portrait.aspect = aspect;
                 if (portrait.Active && aspectChanged) portrait.ExitPortrait();  // 比例变了重进
                 if (!portrait.Active) portrait.EnterPortrait();
             }
-            else if (portrait.Active)
-                portrait.ExitPortrait();
+            else
+                portrait.RestoreDesktopWindow();   // 上次竖屏的窗口尺寸会被 Unity 记住，必须显式改回来
 
             // 连接
             bool shouldRun = d.enableDouyinLive;
