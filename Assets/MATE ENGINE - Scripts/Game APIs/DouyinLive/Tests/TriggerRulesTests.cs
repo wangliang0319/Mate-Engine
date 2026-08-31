@@ -39,5 +39,30 @@ namespace DouyinLive.Tests
             Assert.AreEqual(1, new TriggerRule { level = "l3" }.LevelOrDefault);   // 大小写不匹配
             Assert.AreEqual(3, new TriggerRule { level = "L3" }.LevelOrDefault);
         }
+
+        [Test]
+        public void 默认配置里引用的Animator参数都是项目里真实存在的()
+        {
+            // AvatarAnimatorControllerV2 目前只有这 5 个可用于一次性互动的参数。
+            // 以后加了新动画，把参数名补进这个白名单。
+            var known = new HashSet<string>
+            { "Headpat", "HairStroke", "HoverFaceTrigger", "HoverTrigger", "IntimeRegion" };
+
+            foreach (var r in TriggerConfig.Defaults().rules)
+                foreach (var e in r.effects)
+                    if (e.StartsWith("anim:"))
+                        Assert.IsTrue(known.Contains(e.Substring(5)), $"规则 {r.id} 用了不存在的 Animator 参数");
+        }
+
+        [Test]
+        public void 默认配置里引用的粒子主题都存在()
+        {
+            // CustomVRM.prefab 目前只登记了这一个主题
+            var known = new HashSet<string> { "Dance Trail Blue" };
+            foreach (var r in TriggerConfig.Defaults().rules)
+                foreach (var e in r.effects)
+                    if (e.StartsWith("particle:"))
+                        Assert.IsTrue(known.Contains(e.Substring(9)), $"规则 {r.id} 用了不存在的粒子主题");
+        }
     }
 }
