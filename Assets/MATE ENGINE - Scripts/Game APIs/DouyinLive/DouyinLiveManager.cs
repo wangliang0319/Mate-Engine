@@ -36,6 +36,7 @@ namespace DouyinLive
         readonly RoomContext room = new RoomContext();
         readonly LiveOpsService liveOps = new LiveOpsService();
         bool audienceLoaded;
+        TriggerRouter triggers;
 
         CloudChatBackend cloudBackend;
         LocalChatBackend localBackend;
@@ -148,6 +149,16 @@ namespace DouyinLive
                 if (bigScreen != null) bigScreen.keepWindowSize = true;
             }
 
+            // 可配置触发层：命中 douyin_triggers.json 的规则就由它接管，
+            // 未命中才走下面各 Service 的原有逻辑（旁路式，删配置文件即回退）
+            if (triggers == null)
+            {
+                if (GetComponent<EffectRegistry>() == null) gameObject.AddComponent<EffectRegistry>();
+                triggers = GetComponent<TriggerRouter>();
+                if (triggers == null) triggers = gameObject.AddComponent<TriggerRouter>();
+            }
+            triggers.debugLog = debugLog;
+
             // 竖屏直播窗口：完全由 douyinPortraitAspect 决定，>0 开启、<=0 保持普通窗口
             var portrait = GetComponent<PortraitWindowController>();
             if (portrait == null) portrait = gameObject.AddComponent<PortraitWindowController>();
@@ -185,6 +196,7 @@ namespace DouyinLive
             like.ResetSession();
             danmakuAI.ResetSession();
             idleChatter.ResetSession();
+            if (triggers != null) triggers.ResetSession();
             if (debugLog) Debug.Log("[DouyinLive] Started, connecting " + url);
         }
 
@@ -211,6 +223,7 @@ namespace DouyinLive
 
             if (!blocked)
             {
+                if (triggers != null) triggers.Tick();
                 welcome.Tick();
                 danmakuAI.Tick();
                 idleChatter.Tick();
@@ -223,11 +236,28 @@ namespace DouyinLive
         {
             if (debugLog) Debug.Log($"[DouyinLive] {ev.Type} {ev.Nickname}: {ev.Content}{ev.GiftName}");
             idleChatter.NotifyInteraction();   // 任何观众事件都重置冷场计时
+
+            // 观众记忆/房间上下文要在触发层之前记账：即使这条弹幕被规则消费掉，
+            // 它也应该计入观众画像，否则 AI 回复会丢失上下文。
+            if (ev.Type == DouyinMsgType.Chat)
+            {
+                audience.RecordMessage(ev.UserId, ev.Nickname, ev.Content);
+                room.AddChat(ev.Nickname, ev.Content);
+            }
+            else if (ev.Type == DouyinMsgType.Gift)
+            {
+                danmakuAI.MarkGifter(ev.UserId);
+                int value = Mathf.Max(1, ev.DiamondCount) * Mathf.Max(1, ev.GiftCount);
+                audience.RecordGift(ev.UserId, ev.Nickname, value);
+                room.LastGiftDesc = $"{ev.Nickname}送的{ev.GiftName}";
+                liveOps.RecordGift(ev.UserId, ev.Nickname, value);
+            }
+
+            if (triggers != null && triggers.TryHandle(ev)) return;
+
             switch (ev.Type)
             {
                 case DouyinMsgType.Chat:
-                    audience.RecordMessage(ev.UserId, ev.Nickname, ev.Content);
-                    room.AddChat(ev.Nickname, ev.Content);
                     if (reward.TryHandleDanmaku(ev)) return;
                     danmakuAI.OnDanmaku(ev);
                     break;
@@ -244,12 +274,6 @@ namespace DouyinLive
                     TriggerBigHeadMoment();   // 关注 → 大头特写致谢
                     break;
                 case DouyinMsgType.Gift:
-                    danmakuAI.MarkGifter(ev.UserId);
-                    audience.RecordGift(ev.UserId, ev.Nickname,
-                        Mathf.Max(1, ev.DiamondCount) * Mathf.Max(1, ev.GiftCount));
-                    room.LastGiftDesc = $"{ev.Nickname}送的{ev.GiftName}";
-                    liveOps.RecordGift(ev.UserId, ev.Nickname,
-                        Mathf.Max(1, ev.DiamondCount) * Mathf.Max(1, ev.GiftCount));
                     reward.OnGift(ev);
                     TriggerBigHeadMoment();   // 礼物 → 大头特写致谢
                     break;
