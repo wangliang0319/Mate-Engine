@@ -443,6 +443,11 @@ namespace DouyinLive
         Emotion currentEmotion = Emotion.None;
         float emotionUntil;
 
+        // 外部（触发规则的 mood: 效果）显式设定的表情，独立于上面文本推断出的表情，
+        // 在 DriveEmotion 里优先生效。
+        Emotion externalEmotion = Emotion.None;
+        float externalUntil;
+
         static readonly (string[] keys, Emotion emo)[] EmotionRules =
         {
             (new[]{ "谢谢", "感谢", "开心", "太好", "棒", "耶", "哈哈", "笑", "好呀", "欢迎" }, Emotion.Happy),
@@ -479,18 +484,43 @@ namespace DouyinLive
             if (avatarAnimator != null) avatarAnimator.SetBool(param, false);
         }
 
+        // 外部显式设定表情（目前唯一调用方：EffectRegistry 的 mood: 效果）。
+        // 刻意不受 emotionFromText 影响：那个开关管的是「从说话内容推断表情」，
+        // 而这里是调用方（json 配置的规则）直接配死的，两者是不同的输入源。
+        public bool SetEmotionExternal(string mood, float seconds)
+        {
+            Emotion emo;
+            switch (mood)
+            {
+                case "happy":    emo = Emotion.Happy;    break;
+                case "love":     emo = Emotion.Love;     break;
+                case "sad":      emo = Emotion.Sad;      break;
+                case "surprise": emo = Emotion.Surprise; break;
+                default: return false;
+            }
+            externalEmotion = emo;
+            externalUntil = Time.unscaledTime + seconds;
+            return true;
+        }
+
         void DriveEmotion()
         {
             if (blendshapes == null) return;
-            bool active = emotionFromText && Time.unscaledTime < emotionUntil;
+
+            // 外部显式设定的表情优先于从文本推断出的表情
+            bool externalActive = Time.unscaledTime < externalUntil;
+            bool textActive = emotionFromText && Time.unscaledTime < emotionUntil;
+            bool active = externalActive || textActive;
+            Emotion emo = externalActive ? externalEmotion : currentEmotion;
+
             float s = active ? emotionStrength : 0f;
             float speed = 4f * Time.deltaTime;
             blendshapes.Joy = Mathf.MoveTowards(blendshapes.Joy,
-                (active && (currentEmotion == Emotion.Happy || currentEmotion == Emotion.Love)) ? s : 0f, speed);
+                (active && (emo == Emotion.Happy || emo == Emotion.Love)) ? s : 0f, speed);
             blendshapes.Fun = Mathf.MoveTowards(blendshapes.Fun,
-                (active && currentEmotion == Emotion.Surprise) ? s : 0f, speed);
+                (active && emo == Emotion.Surprise) ? s : 0f, speed);
             blendshapes.Sorrow = Mathf.MoveTowards(blendshapes.Sorrow,
-                (active && currentEmotion == Emotion.Sad) ? s * 0.8f : 0f, speed);
+                (active && emo == Emotion.Sad) ? s * 0.8f : 0f, speed);
         }
 
         // ---------- 口型 ----------
@@ -576,6 +606,7 @@ namespace DouyinLive
                 blendshapes.Joy = 0f; blendshapes.Fun = 0f; blendshapes.Sorrow = 0f;
             }
             emotionUntil = 0f;
+            externalUntil = 0f;
             RemoveBubble();
             speaking = false;
         }
