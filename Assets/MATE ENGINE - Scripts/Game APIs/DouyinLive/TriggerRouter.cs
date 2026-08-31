@@ -16,9 +16,8 @@ namespace DouyinLive
         public TriggerConfig Config { get; private set; }
 
         EffectRegistry effects;
-        SongService song;
+        ActionDirector director;
         readonly TriggerLimiter limiter = new TriggerLimiter();
-        readonly System.Random rng = new System.Random();
 
         long likeTotal;
         FileSystemWatcher watcher;
@@ -35,6 +34,8 @@ namespace DouyinLive
         void Awake()
         {
             effects = GetComponent<EffectRegistry>();
+            director = GetComponent<ActionDirector>();
+            if (director == null) director = gameObject.AddComponent<ActionDirector>();
             limiter.Now = () => Time.unscaledTime;
             Config = TriggerConfigStore.LoadOrCreate();
             StartWatching();
@@ -86,6 +87,7 @@ namespace DouyinLive
         {
             likeTotal = 0;
             limiter.Reset();
+            director.ResetSession();
         }
 
         // ---------- 热重载 ----------
@@ -143,6 +145,8 @@ namespace DouyinLive
                 nextPruneAt = Time.unscaledTime + 300f;   // 每 5 分钟清一次
                 limiter.PruneUsers(600f);
             }
+
+            director.Tick(Config.global);
         }
 
         void OnDestroy()
@@ -171,39 +175,15 @@ namespace DouyinLive
                 return true;   // 已匹配但被限流：消费掉，不要再退回去触发 AI 回复
             }
 
-            // Commit 必须放在 Run 之后、且只在 Run 真的执行了什么效果时才做：
-            // 如果一条规则的效果全部尚未实现（比如 gift3 全是占位效果），Run 会
+            // Commit 必须放在 Submit 之后、且只在 Director 真的消费了这条事件时才做：
+            // 如果一条规则的效果全部尚未实现（比如 gift3 全是占位效果），Submit 会
             // 返回 false、事件要回落到原有逻辑，这时候不能先占用冷却名额——
             // 否则下一次本该命中的同类事件会被这次「空炮」的冷却误伞掉，
-            // 出现「偶尔安静」的间歇性静音。
-            bool executed = Run(rule, ev);
+            // 出现「偶尔安静」的间歇性静音。排队/挤掉队首这两种情况算作消费，
+            // 因为请求本身是真实的，只是还没轮到它执行。
+            bool executed = director.Submit(rule, ev, Config.global);
             if (executed) limiter.Commit(rule, Config.global, ev.UserId);
             return executed;
-        }
-
-        // 返回 true 表示至少有一个效果真正执行了；全部未实现/被拦下则返回 false，
-        // 调用方据此判断这条命中是不是「空炮」，空炮要让事件回落到原有逻辑。
-        bool Run(TriggerRule rule, DouyinEvent ev)
-        {
-            if (song == null) song = GetComponent<SongService>();
-
-            var ctx = new EffectContext
-            {
-                Event = ev,
-                Rule = rule,
-                SingingNow = song != null && song.IsPlaying
-            };
-
-            var list = rule.effects;
-            if (list == null || list.Count == 0) return false;
-
-            if (rule.pick == "random")
-                return effects.Execute(list[rng.Next(list.Count)], ctx);
-
-            bool any = false;
-            foreach (var e in list)
-                any |= effects.Execute(e, ctx);   // 逻辑或但不短路：每个效果都要尝试执行
-            return any;
         }
     }
 }

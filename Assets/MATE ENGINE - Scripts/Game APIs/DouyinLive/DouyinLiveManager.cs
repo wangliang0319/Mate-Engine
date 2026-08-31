@@ -324,6 +324,12 @@ namespace DouyinLive
             bigHeadBusy = false;
         }
 
+        // L2 动作会打断闲聊的暖场话（唱歌/跳舞不受影响）
+        public void InterruptIdleChatter()
+        {
+            idleChatter.NotifyInteraction();
+        }
+
         bool IsBlocked()
         {
             foreach (var go in blockObjects)
