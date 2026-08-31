@@ -87,9 +87,12 @@ namespace DouyinLive
             }
         }
 
-        public void Execute(string effectId, EffectContext ctx)
+        // 返回 true 表示确实执行了某个效果；false 表示效果 ID 未实现，或被
+        // 唱歌闸门/内部校验拦下什么都没做。TriggerRouter 用这个返回值判断
+        // 一条规则是不是「全体效果都是空炮」，空炮要让事件回落到原有逻辑。
+        public bool Execute(string effectId, EffectContext ctx)
         {
-            if (string.IsNullOrWhiteSpace(effectId) || ctx == null) return;
+            if (string.IsNullOrWhiteSpace(effectId) || ctx == null) return false;
             string id = effectId.Trim();
             string arg = "";
             int colon = id.IndexOf(':');
@@ -99,13 +102,13 @@ namespace DouyinLive
 
             switch (id)
             {
-                case "anim":     if (!ctx.SingingNow || Level(ctx) == 1) PulseAnim(arg); break;
-                case "face":     if (!ctx.SingingNow || Level(ctx) == 1) PlayFace(arg);  break;
-                case "mood":     SetMood(arg);            break;
-                case "particle": OverrideParticle(arg);   break;
-                case "say":      Say(FillPlaceholders(arg, ctx.Event)); break;
-                case "menu":     SayMenu();               break;
-                default:         WarnOnce(id);            break;
+                case "anim":     return (!ctx.SingingNow || Level(ctx) == 1) && PulseAnim(arg);
+                case "face":     return (!ctx.SingingNow || Level(ctx) == 1) && PlayFace(arg);
+                case "mood":     return SetMood(arg);
+                case "particle": return OverrideParticle(arg);
+                case "say":      return Say(FillPlaceholders(arg, ctx.Event));
+                case "menu":     return SayMenu();
+                default:         WarnOnce(id); return false;
             }
         }
 
@@ -119,19 +122,20 @@ namespace DouyinLive
 
         // ---------- anim ----------
 
-        void PulseAnim(string param)
+        bool PulseAnim(string param)
         {
             ResolveAvatar();
-            if (avatarAnimator == null || string.IsNullOrEmpty(param)) return;
+            if (avatarAnimator == null || string.IsNullOrEmpty(param)) return false;
 
             var p = System.Array.Find(avatarAnimator.parameters,
                 x => x.name == param && x.type == AnimatorControllerParameterType.Bool);
-            if (p == null) { WarnOnce("anim:" + param); return; }
+            if (p == null) { WarnOnce("anim:" + param); return false; }
 
             // 捕获当前 Animator 实例，而不是让协程读共享字段——见 PendingPulse 上的注释
             var pending = new PendingPulse { Anim = avatarAnimator, Param = param };
             pendingPulses.Add(pending);
             StartCoroutine(PulseBool(pending, 0.4f));
+            return true;
         }
 
         IEnumerator PulseBool(PendingPulse pending, float seconds)
@@ -144,18 +148,19 @@ namespace DouyinLive
 
         // ---------- face ----------
 
-        void PlayFace(string state)
+        bool PlayFace(string state)
         {
             ResolveAvatar();
-            if (avatarAnimator == null || string.IsNullOrEmpty(state)) return;
+            if (avatarAnimator == null || string.IsNullOrEmpty(state)) return false;
 
             for (int layer = 0; layer < avatarAnimator.layerCount; layer++)
             {
                 if (!avatarAnimator.HasState(layer, Animator.StringToHash(state))) continue;
                 avatarAnimator.CrossFadeInFixedTime(state, 0.2f, layer);
-                return;
+                return true;
             }
             WarnOnce("face:" + state);
+            return false;
         }
 
         // ---------- mood ----------
@@ -164,31 +169,36 @@ namespace DouyinLive
         // 没有 active 表情的字段拉回 0（4/s），直接赋值的效果会在约 0.2s 内被这个
         // 归位吃掉，等于没生效。改为走 SpeechPipeline 自己的外部表情通道，
         // 这样也顺带保证了 mood: 效果和说话时自然带出的表情用同一套强度/映射。
-        void SetMood(string mood)
+        bool SetMood(string mood)
         {
-            if (speech == null) return;
+            if (speech == null) return false;
             if (!speech.SetEmotionExternal(mood, MoodDurationSeconds))
+            {
                 WarnOnce("mood:" + mood);
+                return false;
+            }
+            return true;
         }
 
         // ---------- particle ----------
 
-        void OverrideParticle(string theme)
+        bool OverrideParticle(string theme)
         {
             var ph = Particles;
-            if (ph == null || string.IsNullOrEmpty(theme)) return;
+            if (ph == null || string.IsNullOrEmpty(theme)) return false;
 
             // 主题名打错时 SetTheme 不会报错，只是静默无效果 —— 主动检出来
             bool exists = false;
             foreach (var r in ph.rules)
                 if (r != null && r.themeTag == theme) { exists = true; break; }
-            if (!exists) { WarnOnce("particle:" + theme); return; }
+            if (!exists) { WarnOnce("particle:" + theme); return false; }
 
             if (particleRestore == null) particleThemeBeforeOverride = ph.selectedTheme;
             else StopCoroutine(particleRestore);
 
             ph.SetTheme(theme);
             particleRestore = StartCoroutine(RestoreParticleAfter(6f));
+            return true;
         }
 
         IEnumerator RestoreParticleAfter(float seconds)
@@ -202,15 +212,16 @@ namespace DouyinLive
 
         // ---------- say ----------
 
-        void Say(string text)
+        bool Say(string text)
         {
-            if (speech == null || string.IsNullOrWhiteSpace(text)) return;
+            if (speech == null || string.IsNullOrWhiteSpace(text)) return false;
             speech.Enqueue(text, SpeechPipeline.Priority.GiftThanks, 30f);
+            return true;
         }
 
-        void SayMenu()
+        bool SayMenu()
         {
-            Say("给大家报下玩法哦：发 点歌加歌名 我就唱给你听；发 换角色 我就换一身新形象；" +
+            return Say("给大家报下玩法哦：发 点歌加歌名 我就唱给你听；发 换角色 我就换一身新形象；" +
                 "发 拍头、捋头发、抱抱 都能和我互动；点赞关注我都会感谢，送礼物还能看我跳舞哦~");
         }
 

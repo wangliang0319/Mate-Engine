@@ -37,6 +37,7 @@ namespace DouyinLive
         readonly LiveOpsService liveOps = new LiveOpsService();
         bool audienceLoaded;
         TriggerRouter triggers;
+        EffectRegistry triggerEffects;
 
         CloudChatBackend cloudBackend;
         LocalChatBackend localBackend;
@@ -153,11 +154,13 @@ namespace DouyinLive
             // 未命中才走下面各 Service 的原有逻辑（旁路式，删配置文件即回退）
             if (triggers == null)
             {
-                if (GetComponent<EffectRegistry>() == null) gameObject.AddComponent<EffectRegistry>();
+                triggerEffects = GetComponent<EffectRegistry>();
+                if (triggerEffects == null) triggerEffects = gameObject.AddComponent<EffectRegistry>();
                 triggers = GetComponent<TriggerRouter>();
                 if (triggers == null) triggers = gameObject.AddComponent<TriggerRouter>();
             }
             triggers.debugLog = debugLog;
+            if (triggerEffects != null) triggerEffects.debugLog = debugLog;
 
             // 竖屏直播窗口：完全由 douyinPortraitAspect 决定，>0 开启、<=0 保持普通窗口
             var portrait = GetComponent<PortraitWindowController>();
@@ -251,6 +254,10 @@ namespace DouyinLive
                 audience.RecordGift(ev.UserId, ev.Nickname, value);
                 room.LastGiftDesc = $"{ev.Nickname}送的{ev.GiftName}";
                 liveOps.RecordGift(ev.UserId, ev.Nickname, value);
+            }
+            else if (ev.Type == DouyinMsgType.Like)
+            {
+                like.RecordOnly(ev);   // 会话点赞总数不能因为被触发规则消费而漏计
             }
 
             if (triggers != null && triggers.TryHandle(ev)) return;
