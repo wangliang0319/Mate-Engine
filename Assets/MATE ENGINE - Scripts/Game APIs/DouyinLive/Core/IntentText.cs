@@ -47,6 +47,20 @@ namespace DouyinLive
             return hasWord;
         }
 
+        // 效果 ID 的子模式哨兵词。这些词长得就像正常的名字，IsUsableArg 拦不住，
+        // 但拼进效果 ID 之后会换掉子模式而不是当参数用——观众发「ask」会被拼成
+        // song:ask，那是「再问一遍并重新开槽」，不是歌名。
+        static readonly string[] ReservedArgs = { "ask", "request", "random", "builtin" };
+
+        public static bool IsReservedArg(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            s = s.Trim();
+            foreach (var w in ReservedArgs)
+                if (string.Equals(s, w, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
         public static IntentKind LooksLikeIntent(string s)
         {
             if (string.IsNullOrWhiteSpace(s)) return IntentKind.None;

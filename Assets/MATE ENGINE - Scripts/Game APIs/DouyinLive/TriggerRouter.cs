@@ -220,8 +220,10 @@ namespace DouyinLive
             string arg = (ev.Content ?? "").Trim();
             // 通不过校验时刻意不 Take：槽位连同开槽时间原样留着，这条弹幕正常
             // 走闲聊，观众还有机会补答。取出来再放回去会刷新时间戳，连发几个
-            // 「666」就能把 30 秒窗口无限续期。
-            if (!IntentText.IsUsableArg(arg)) return false;
+            // 「666」就能把 30 秒窗口无限续期。哨兵词同理：观众发「ask」会被拼成
+            // song:ask，那是重新开槽而不是歌名，这里不接住就等于给了一条零冷却的
+            // 无限重开路径（补槽刻意不过限流闸）。
+            if (!IntentText.IsUsableArg(arg) || IntentText.IsReservedArg(arg)) return false;
 
             var rule = FindRuleById(slot.RuleId);
             if (rule == null || !rule.enabled)
@@ -263,13 +265,11 @@ namespace DouyinLive
                 return false;
             }
 
-            // 名字不可用就只问不做：ask 分支会开槽等观众补答。这个哨兵词不能由
-            // 模型说了算：模型真返回 arg:"ask" 时会被拼成 song:ask，那是换了个
-            // 子模式，不是歌名。
+            // 名字不可用就只问不做：ask 分支会开槽等观众补答。哨兵词不能由模型
+            // 说了算：模型真返回 arg:"ask" 时会被拼成 song:ask，那是换了个子模式，
+            // 不是歌名。
             string a = (arg ?? "").Trim();
-            bool usable = IntentText.IsUsableArg(a)
-                          && !string.Equals(a, "ask", StringComparison.OrdinalIgnoreCase)
-                          && !string.Equals(a, "request", StringComparison.OrdinalIgnoreCase);
+            bool usable = IntentText.IsUsableArg(a) && !IntentText.IsReservedArg(a);
             string effect = RuleQuery.BuildEffect(kind, usable ? a : "ask");
 
             bool executed = director.Submit(RuleQuery.WithEffect(rule, effect), ev, Config.global);

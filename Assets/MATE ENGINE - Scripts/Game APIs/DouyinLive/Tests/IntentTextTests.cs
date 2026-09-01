@@ -59,6 +59,45 @@ namespace DouyinLive.Tests
             Assert.IsFalse(IntentText.IsUsableArg("~!@#"));
         }
 
+        // ---------- IsReservedArg ----------
+
+        [Test]
+        public void 四个哨兵词都被认出来()
+        {
+            // 拼进效果 ID 会换掉子模式而不是当名字用，IsUsableArg 看不出来
+            Assert.IsTrue(IntentText.IsReservedArg("ask"));
+            Assert.IsTrue(IntentText.IsReservedArg("request"));
+            Assert.IsTrue(IntentText.IsReservedArg("random"));
+            Assert.IsTrue(IntentText.IsReservedArg("builtin"));
+        }
+
+        [Test]
+        public void 哨兵词大小写和空格都不敏感()
+        {
+            // 观众打字带空格、模型返回大写，都得挡住
+            Assert.IsTrue(IntentText.IsReservedArg("ASK"));
+            Assert.IsTrue(IntentText.IsReservedArg("Request"));
+            Assert.IsTrue(IntentText.IsReservedArg("  random  "));
+            Assert.IsTrue(IntentText.IsReservedArg("\tBuiltIn\n"));
+        }
+
+        [Test]
+        public void 正常名字不是哨兵词()
+        {
+            Assert.IsFalse(IntentText.IsReservedArg("赤伶"));
+            Assert.IsFalse(IntentText.IsReservedArg("Lemon"));
+            Assert.IsFalse(IntentText.IsReservedArg("ask me"), "只有整串相等才算哨兵词");
+            Assert.IsFalse(IntentText.IsReservedArg("randomize"));
+        }
+
+        [Test]
+        public void 空白不是哨兵词()
+        {
+            Assert.IsFalse(IntentText.IsReservedArg(null));
+            Assert.IsFalse(IntentText.IsReservedArg(""));
+            Assert.IsFalse(IntentText.IsReservedArg("   "));
+        }
+
         // ---------- LooksLikeIntent ----------
 
         [Test]
