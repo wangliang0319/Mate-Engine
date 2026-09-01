@@ -116,6 +116,7 @@ namespace DouyinLive
                 if (songService == null) songService = gameObject.AddComponent<SongService>();
             }
             songService.Speech = speech;
+            songService.targetLoudness = Mathf.Clamp(d.douyinSongLoudness, 0.01f, 0.3f);
             reward.Song = songService;
 
             danmakuAI.Speech = speech;

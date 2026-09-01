@@ -27,7 +27,9 @@ namespace DouyinLive
 
         [Header("Playback")]
         public AudioSource musicSource;
-        [Range(0f, 1f)] public float musicVolume = 0.85f;
+        // 播放前把歌归一化到这个 RMS 响度。不用固定音量系数，是因为不同母带之间
+        // 响度能差 6-8dB，一个系数调不到所有歌都合适。由 douyinSongLoudness 接线。
+        public float targetLoudness = 0.055f;
         public bool chorusOnly = true;      // 只播高潮段
         public int chorusSeconds = 60;      // 高潮段目标时长
         public int maxSongSeconds = 300;   // 单曲最长播放时长（防超长占播）
@@ -113,6 +115,9 @@ namespace DouyinLive
                 pcm = ExtractChorus(pcm, chorusSeconds);
             }
 
+            // 响度归一化：必须在切完高潮之后做，量的才是真正会播出去的那段
+            NormalizeLoudness(pcm, targetLoudness);
+
             // 3) 播放 + 跳舞（找到即唱，无报幕）
             var clip = AudioClip.Create("song", pcm.Samples.Length / pcm.Channels, pcm.Channels, pcm.SampleRate, false);
             clip.SetData(pcm.Samples, 0);
@@ -135,7 +140,7 @@ namespace DouyinLive
 
             if (musicSource == null) musicSource = gameObject.AddComponent<AudioSource>();
             musicSource.clip = clip;
-            musicSource.volume = musicVolume;
+            musicSource.volume = 1f;   // 响度已在 PCM 上归一化，这里不再叠第二个音量系数
             musicSource.loop = false;
             musicSource.Play();
 
@@ -406,6 +411,37 @@ namespace DouyinLive
                 }
             }
             return new TTSResult { Samples = cut, Channels = ch, SampleRate = sr };
+        }
+
+        // ---------- 响度归一化 ----------
+
+        // 把整段 PCM 缩放到目标 RMS，原地改写（这段样本刚从解码器/高潮切片出来，没有别的持有者）。
+        // 用 RMS 而不是峰值：商业母带峰值几乎都顶在 1.0，按峰值对齐等于没对齐；
+        // 人耳听到的"响"跟 RMS 走。实测网易云母带 RMS≈0.29、TTS 说话声≈0.05，差 15dB。
+        static void NormalizeLoudness(TTSResult pcm, float targetRms)
+        {
+            if (targetRms <= 0f || pcm?.Samples == null || pcm.Samples.Length == 0) return;
+
+            var s = pcm.Samples;
+            double sum = 0;
+            float peak = 0f;
+            for (int i = 0; i < s.Length; i++)
+            {
+                float v = s[i];
+                sum += (double)v * v;
+                float a = v < 0f ? -v : v;
+                if (a > peak) peak = a;
+            }
+            float rms = (float)System.Math.Sqrt(sum / s.Length);
+            if (rms < 1e-5f) return;   // 整段近乎静音，放大只会把底噪抬起来
+
+            float gain = targetRms / rms;
+            // 提升安静曲目时可能顶到满刻度，此时宁可比目标轻一点也不能削波
+            if (peak * gain > 0.99f) gain = 0.99f / peak;
+            if (gain > 0.98f && gain < 1.02f) return;   // 本来就接近目标，不折腾
+
+            for (int i = 0; i < s.Length; i++) s[i] *= gain;
+            Debug.Log($"[SongService] 响度归一化 RMS {rms:F3} → {rms * gain:F3} (x{gain:F2})");
         }
 
         // ---------- 网易云接口 ----------

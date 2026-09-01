@@ -212,6 +212,9 @@ public class SaveLoadHandler : MonoBehaviour
         public int douyinDanceChainCount = 1;              // 一次触发连跳几支
         public string douyinDanceParticleTheme = "";       // 跳舞期间临时切的粒子主题，留空=不切
         public float douyinDancePortraitSoftZoneRatio = 0.15f;  // 竖屏防出画的软边界占屏宽比例
+        // 唱歌目标响度(RMS)。商业歌曲母带 RMS 约 0.29，TTS 说话声约 0.05，
+        // 直接混就是歌盖过人声(差 15dB)，所以播放前把歌统一归一化到这个值。
+        public float douyinSongLoudness = 0.055f;
         public List<string> douyinIdleSongList = new()
         {
             "赤伶", "游山恋", "探窗", "辞九门回忆", "半生雪", "踏山河",
