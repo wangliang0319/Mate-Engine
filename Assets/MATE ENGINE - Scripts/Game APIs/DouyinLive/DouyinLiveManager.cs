@@ -280,7 +280,11 @@ namespace DouyinLive
                 // 《抱抱》，会命中 love 规则去播飞吻而不是唱歌。宁可漏一次也不
                 // 要乱触发，这个顺序也顺带省掉了「答案是不是另一条命令」那道校验。
                 if (triggers.TryHandle(ev)) return;
-                if (triggers.TryFillSlot(ev)) return;
+                // RewardService 的硬编码命令（点歌/换角色/菜单/玩法）和关键词规则
+                // 同级，同样要排在槽位补全之前。观众在追问期间发「点歌 晴天」是
+                // 一条新命令，不是答案——当答案处理会把「点歌 晴天」整串当歌名。
+                // 槽位刻意不动，这条弹幕交给 HandleChatLegacy 里的 RewardService。
+                if (!RewardService.IsDanmakuCommand(ev.Content) && triggers.TryFillSlot(ev)) return;
             }
 
             switch (ev.Type)

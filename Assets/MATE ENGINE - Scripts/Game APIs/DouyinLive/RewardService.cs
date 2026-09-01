@@ -40,6 +40,13 @@ namespace DouyinLive
             }
         }
 
+        // 这条弹幕是不是硬编码点播命令。给 Route() 判优先级用：命令要排在追问
+        // 槽位补全之前，观众在追问期间发「点歌 晴天」那是新命令不是答案。
+        public static bool IsDanmakuCommand(string content)
+        {
+            return RequestRegex.IsMatch(content ?? "");
+        }
+
         // 返回 true 表示该弹幕是点播命令，已被消费（不再交给 AI 回复）
         public bool TryHandleDanmaku(DouyinEvent ev)
         {
