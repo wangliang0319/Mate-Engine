@@ -291,7 +291,7 @@ namespace DouyinLive
 
         bool bigHeadBusy;
 
-        void TriggerBigHeadMoment()
+        public void TriggerBigHeadMoment()
         {
             var d = SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data : null;
             if (d == null || !d.douyinBigHeadReaction) return;
@@ -322,6 +322,12 @@ namespace DouyinLive
 
             handler.SetBigScreen(false);
             bigHeadBusy = false;
+        }
+
+        // 供 EffectRegistry 的 swapAvatar 效果调用
+        public void SwapAvatarFromTrigger(string userName)
+        {
+            reward.SwitchRandomAvatar(userName);
         }
 
         // L2 动作会打断闲聊的暖场话（唱歌/跳舞不受影响）

@@ -89,7 +89,7 @@ namespace DouyinLive
 
         // ---------- 换角色 ----------
 
-        void SwitchRandomAvatar(string userName)
+        public void SwitchRandomAvatar(string userName)
         {
             if (Time.unscaledTime - lastSwitchAt < SwitchCooldown)
             {

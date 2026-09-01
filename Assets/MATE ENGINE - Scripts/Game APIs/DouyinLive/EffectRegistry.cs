@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using CustomDancePlayer;
 
 namespace DouyinLive
 {
@@ -106,9 +107,14 @@ namespace DouyinLive
                 case "face":     return (!ctx.SingingNow || Level(ctx) == 1) && PlayFace(arg);
                 case "mood":     return SetMood(arg);
                 case "particle": return OverrideParticle(arg);
-                case "say":      return Say(FillPlaceholders(arg, ctx.Event));
-                case "menu":     return SayMenu();
-                default:         WarnOnce(id); return false;
+                case "say":       return Say(FillPlaceholders(arg, ctx.Event));
+                case "menu":      return SayMenu();
+                case "bigscreen": return TriggerBigScreen();
+                case "dance":     return PlayDance(arg);
+                case "song":      return PlaySong(arg, ctx);
+                case "swapAvatar":return SwapAvatar(ctx);
+                case "outfit":    return SwitchOutfit(arg);
+                default:          WarnOnce(id); return false;
             }
         }
 
@@ -223,6 +229,144 @@ namespace DouyinLive
         {
             return Say("给大家报下玩法哦：发 点歌加歌名 我就唱给你听；发 换角色 我就换一身新形象；" +
                 "发 拍头、捋头发、抱抱 都能和我互动；点赞关注我都会感谢，送礼物还能看我跳舞哦~");
+        }
+
+        // ---------- bigscreen ----------
+
+        bool TriggerBigScreen()
+        {
+            var mgr = DouyinLiveManager.Instance;
+            if (mgr == null) return false;
+            mgr.TriggerBigHeadMoment();
+            return true;
+        }
+
+        // ---------- dance ----------
+
+        AvatarDanceHandler danceHandler;
+        AvatarDanceHandler Dance
+        {
+            get
+            {
+                if (danceHandler == null)
+                    danceHandler = FindFirstObjectByType<AvatarDanceHandler>(FindObjectsInactive.Include);
+                return danceHandler;
+            }
+        }
+
+        bool PlayDance(string arg)
+        {
+            var d = Dance;
+            if (arg == "builtin" || d == null || d.EntryCount <= 0) return PlayBuiltinDance();
+
+            if (arg == "random")
+            {
+                // 洗牌轮播在第三期由 DanceDirector 接管；这一期先用现有的随机
+                if (d.PlayIndex(UnityEngine.Random.Range(0, d.EntryCount))) return true;
+                return PlayBuiltinDance();
+            }
+
+            int idx = d.FindIndexByTitleFuzzy(arg);
+            if (idx < 0) { Debug.LogWarning($"[Effect] 曲库里没有舞包: {arg}"); return false; }
+            if (d.PlayIndex(idx)) return true;
+            return PlayBuiltinDance();
+        }
+
+        bool PlayBuiltinDance()
+        {
+            var avatar = FindFirstObjectByType<AvatarAnimatorController>();
+            if (avatar == null || avatar.animator == null) return false;
+            avatar.isDancing = true;
+            avatar.animator.SetBool("isDancing", true);
+            return true;
+        }
+
+        // ---------- song ----------
+
+        SongService songService;
+        SongService Song { get { if (songService == null) songService = GetComponent<SongService>(); return songService; } }
+
+        bool PlaySong(string arg, EffectContext ctx)
+        {
+            var s = Song;
+            if (s == null) { WarnOnce("song"); return false; }
+            string name = string.IsNullOrEmpty(ctx.Event?.Nickname) ? "朋友" : ctx.Event.Nickname;
+
+            if (arg != "request") { s.RequestSong(arg, name); return true; }
+
+            // song:request 从弹幕正文里剥掉命中的关键词，剩下的就是歌名
+            string title = StripKeywords(ctx.Event?.Content ?? "", ctx.Rule);
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                Say($"{name} 想点什么歌呀？发 点歌加歌名 哦~");
+                return true;
+            }
+
+            // 曲库里有同名舞包时优先播它：真编舞 + 原曲音频，效果比在线点歌好
+            var d = Dance;
+            if (d != null)
+            {
+                int idx = d.FindIndexByTitleFuzzy(title);
+                if (idx >= 0 && d.PlayIndex(idx))
+                {
+                    Say($"好嘞！{name} 点的 {title}，舞蹈版走起！");
+                    return true;
+                }
+            }
+            s.RequestSong(title, name);
+            return true;
+        }
+
+        static string StripKeywords(string content, TriggerRule rule)
+        {
+            if (rule?.keywords == null) return content.Trim();
+            string s = content;
+            foreach (var w in rule.keywords)
+            {
+                if (string.IsNullOrWhiteSpace(w)) continue;
+                s = s.Replace(w.Trim(), "");
+            }
+            return s.Trim();
+        }
+
+        // ---------- swapAvatar ----------
+
+        bool SwapAvatar(EffectContext ctx)
+        {
+            string name = string.IsNullOrEmpty(ctx.Event?.Nickname) ? "朋友" : ctx.Event.Nickname;
+            var mgr = DouyinLiveManager.Instance;
+            if (mgr == null) { WarnOnce("swapAvatar"); return false; }
+            mgr.SwapAvatarFromTrigger(name);
+            return true;
+        }
+
+        // ---------- outfit ----------
+
+        bool SwitchOutfit(string arg)
+        {
+            var handlers = AccessoiresHandler.ActiveHandlers;
+            if (handlers == null || handlers.Count == 0) { WarnOnce("outfit"); return false; }
+
+            var all = new List<AccessoiresHandler.AccessoryRule>();
+            foreach (var h in handlers)
+            {
+                if (h == null || h.rules == null) continue;
+                foreach (var r in h.rules) if (r != null) all.Add(r);
+            }
+            if (all.Count == 0) { WarnOnce("outfit"); return false; }
+
+            if (arg == "random")
+            {
+                var pick = all[UnityEngine.Random.Range(0, all.Count)];
+                pick.isEnabled = !pick.isEnabled;
+                if (debugLog) Debug.Log($"[Effect] outfit 切换 {pick.ruleName} → {pick.isEnabled}");
+                return true;
+            }
+
+            foreach (var r in all)
+                if (r.ruleName == arg) { r.isEnabled = !r.isEnabled; return true; }
+            WarnOnce("outfit:" + arg);
+            return false;
         }
 
         public static string FillPlaceholders(string tpl, DouyinEvent ev)
