@@ -112,10 +112,19 @@ namespace DouyinLive.Tests
             };
 
             var copy = RuleQuery.WithEffect(src, "swapAvatar:小白");
+            var fresh = new TriggerRule();
 
             foreach (var f in typeof(TriggerRule).GetFields())
             {
                 if (f.Name == "effects" || f.Name == "pick") continue;
+
+                // 光比 src 和 copy 挡不住真正要防的那种回归：新加的第 19 个字段
+                // 上面的初始化块没赋值，src 和 copy 就都是声明默认值，漏抄也照样绿。
+                // 所以先逼着这个测试自己跟上——加字段的人必须回来赋一个非默认值，
+                // 而那一步正是让 WithEffect 的漏抄暴露出来的时候。
+                Assert.AreNotEqual(f.GetValue(fresh), f.GetValue(src),
+                    $"TriggerRule 新增了字段 {f.Name}，请在本测试里给它赋一个非默认值");
+
                 Assert.AreEqual(f.GetValue(src), f.GetValue(copy),
                     $"WithEffect 漏抄了字段 {f.Name}");
             }

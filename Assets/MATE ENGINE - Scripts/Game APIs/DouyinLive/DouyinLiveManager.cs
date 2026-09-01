@@ -303,7 +303,7 @@ namespace DouyinLive
             // 不挡住的话每条命令都会先烧一次 LLM 调用，再抢 RewardService 的活。
             if (ev.Type == DouyinMsgType.Chat && !RewardService.IsDanmakuCommand(ev.Content) &&
                 triggers != null && triggers.IntentFallbackEnabled &&
-                intents.TryResolve(ev, OnIntentResolved, HandleChatLegacy))
+                intents.TryResolve(ev, OnIntentResolved, OnIntentGaveUp))
                 return;
 
             switch (ev.Type)
@@ -345,6 +345,14 @@ namespace DouyinLive
             if (triggers != null && triggers.TryHandleIntent(ev, kind, arg)) return;
             // 规则不存在或被限流拦下：「我想听首歌」本身是很好的闲聊素材，
             // 让 AI 回一句是体面的降级
+            HandleChatLegacy(ev);
+        }
+
+        // 模型判出 none 走的是另一条回调，同样是停播前发起、停播后才回来的，
+        // 直接把 HandleChatLegacy 交出去会在 StopLive 清完队列之后又塞一句话进去
+        void OnIntentGaveUp(DouyinEvent ev)
+        {
+            if (!running) return;
             HandleChatLegacy(ev);
         }
 
