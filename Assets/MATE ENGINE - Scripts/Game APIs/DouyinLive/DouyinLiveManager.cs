@@ -344,6 +344,13 @@ namespace DouyinLive
             reward.SwitchRandomAvatar(userName);
         }
 
+        // swapAvatar:<角色名> —— 名字为空或匹配不上时退回随机换
+        public void SwapAvatarFromTrigger(string userName, string wanted)
+        {
+            if (string.IsNullOrWhiteSpace(wanted)) reward.SwitchRandomAvatar(userName);
+            else reward.SwitchAvatarByName(userName, wanted);
+        }
+
         // 供 EffectRegistry 的 sayAI: 效果使用
         public void GenerateFromTrigger(string prompt, System.Action<string> onDone)
         {

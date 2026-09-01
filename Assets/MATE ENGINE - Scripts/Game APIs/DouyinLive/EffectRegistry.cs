@@ -114,9 +114,9 @@ namespace DouyinLive
                 case "say":       return Say(FillPlaceholders(arg, ctx.Event));
                 case "menu":      return SayMenu();
                 case "bigscreen": return TriggerBigScreen();
-                case "dance":     return PlayDance(arg);
+                case "dance":     return PlayDance(arg, ctx);
                 case "song":      return PlaySong(arg, ctx);
-                case "swapAvatar": return SwapAvatar(ctx);
+                case "swapAvatar": return SwapAvatar(arg, ctx);
                 case "outfit":    return SwitchOutfit(arg);
                 case "sayAI":     return SayAI(arg, ctx);
                 default:          WarnOnce(id); return false;
@@ -263,9 +263,27 @@ namespace DouyinLive
 
         DanceDirector danceDirector;
 
-        bool PlayDance(string arg)
+        bool PlayDance(string arg, EffectContext ctx)
         {
+            if (arg == "ask") return AskAndOpenSlot(IntentKind.Dance, ctx);
+
             var d = Dance;
+
+            if (arg == "request")
+            {
+                string title = StripKeywords(ctx.Event?.Content ?? "", ctx.Rule);
+                if (string.IsNullOrWhiteSpace(title)) return AskAndOpenSlot(IntentKind.Dance, ctx);
+
+                if (d != null)
+                {
+                    int i = d.FindIndexByTitleFuzzy(title);
+                    if (i >= 0 && d.PlayIndex(i)) { Say($"好嘞，{title} 来咯！"); return true; }
+                }
+                // 点名的舞包没有就随便来一支，别让观众的请求石沉大海
+                Say($"曲库里还没有 {title}，先随便来一支吧~");
+                return PlayDance("random", ctx);
+            }
+
             if (arg == "builtin" || d == null || d.EntryCount <= 0) return PlayBuiltinDance();
 
             if (arg == "random")
@@ -290,6 +308,43 @@ namespace DouyinLive
             return true;
         }
 
+        // ---------- 追问 ----------
+
+        TriggerRouter routerCache;
+        // TriggerRouter 一定和本组件在同一个 GameObject 上（它标了
+        // [RequireComponent(typeof(EffectRegistry))]），惰性取一次缓存住
+        TriggerRouter Router
+        {
+            get
+            {
+                if (routerCache == null) routerCache = GetComponent<TriggerRouter>();
+                return routerCache;
+            }
+        }
+
+        static string DefaultAsk(IntentKind kind)
+        {
+            // 措辞刻意引导「直接把名字发出来」——现在直接发真的能接上了，
+            // 再教观众「发 点歌加歌名」等于把新能力藏起来
+            if (kind == IntentKind.Dance)  return "{u} 想看哪支舞呀？把舞名发出来~";
+            if (kind == IntentKind.Avatar) return "{u} 想让我换成谁呀？说个名字~";
+            return "{u} 想听什么歌呀？直接把歌名发出来就行~";
+        }
+
+        // 问一句 + 记下「在等这个人回答」。返回 true 表示确实说了话，不算空炮。
+        bool AskAndOpenSlot(IntentKind kind, EffectContext ctx)
+        {
+            string tpl = ctx.Rule != null && !string.IsNullOrWhiteSpace(ctx.Rule.askPrompt)
+                ? ctx.Rule.askPrompt
+                : DefaultAsk(kind);
+            if (!Say(FillPlaceholders(tpl, ctx.Event))) return false;
+
+            var r = Router;
+            if (r != null && ctx.Event != null && ctx.Rule != null)
+                r.OpenSlot(ctx.Event, kind, ctx.Rule.id);
+            return true;
+        }
+
         // ---------- song ----------
 
         SongService songService;
@@ -301,15 +356,14 @@ namespace DouyinLive
             if (s == null) { WarnOnce("song"); return false; }
             string name = string.IsNullOrEmpty(ctx.Event?.Nickname) ? "朋友" : ctx.Event.Nickname;
 
+            if (arg == "ask") return AskAndOpenSlot(IntentKind.Song, ctx);
             if (arg != "request") { s.RequestSong(arg, name); return true; }
 
             // song:request 从弹幕正文里剥掉命中的关键词，剩下的就是歌名
             string title = StripKeywords(ctx.Event?.Content ?? "", ctx.Rule);
-            if (string.IsNullOrWhiteSpace(title))
-            {
-                Say($"{name} 想点什么歌呀？发 点歌加歌名 哦~");
-                return true;
-            }
+            // 只问不记是这个功能原来的 bug：观众答的歌名下一轮匹配不到任何规则，
+            // 直接掉进 AI 闲聊。现在问的同时开一个槽位等他回答。
+            if (string.IsNullOrWhiteSpace(title)) return AskAndOpenSlot(IntentKind.Song, ctx);
 
             // 曲库里有同名舞包时优先播它：真编舞 + 原曲音频，效果比在线点歌好
             var d = Dance;
@@ -340,12 +394,24 @@ namespace DouyinLive
 
         // ---------- swapAvatar ----------
 
-        bool SwapAvatar(EffectContext ctx)
+        bool SwapAvatar(string arg, EffectContext ctx)
         {
             string name = string.IsNullOrEmpty(ctx.Event?.Nickname) ? "朋友" : ctx.Event.Nickname;
             var mgr = DouyinLiveManager.Instance;
             if (mgr == null) { WarnOnce("swapAvatar"); return false; }
-            mgr.SwapAvatarFromTrigger(name);
+
+            // 裸 swapAvatar 保持老行为：随机换。老配置不能因为这次改动变样。
+            if (string.IsNullOrEmpty(arg)) { mgr.SwapAvatarFromTrigger(name); return true; }
+
+            if (arg == "ask") return AskAndOpenSlot(IntentKind.Avatar, ctx);
+
+            string wanted = arg;
+            if (arg == "request")
+            {
+                wanted = StripKeywords(ctx.Event?.Content ?? "", ctx.Rule);
+                if (string.IsNullOrWhiteSpace(wanted)) return AskAndOpenSlot(IntentKind.Avatar, ctx);
+            }
+            mgr.SwapAvatarFromTrigger(name, wanted);
             return true;
         }
 

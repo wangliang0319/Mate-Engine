@@ -36,6 +36,7 @@ namespace DouyinLive
             if (director == null) director = gameObject.AddComponent<ActionDirector>();
             if (GetComponent<DanceDirector>() == null) gameObject.AddComponent<DanceDirector>();
             limiter.Now = () => Time.unscaledTime;
+            Slots.Now = () => Time.unscaledTime;
             Config = TriggerConfigStore.LoadOrCreate();
             StartWatching();
         }
@@ -154,6 +155,15 @@ namespace DouyinLive
         }
 
         // ---------- 路由 ----------
+
+        public IntentSlots Slots { get; } = new IntentSlots();
+
+        public void OpenSlot(DouyinEvent ev, IntentKind kind, string ruleId)
+        {
+            if (ev == null) return;
+            Slots.Open(ev.UserId, ev.Nickname, kind, ruleId);
+            if (debugLog) Debug.Log($"[Triggers] 为 {ev.Nickname} 开了 {kind} 追问槽位");
+        }
 
         // 返回 true 表示该事件已被触发层消费，调用方不再走原有逻辑
         public bool TryHandle(DouyinEvent ev)

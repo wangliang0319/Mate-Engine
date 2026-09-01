@@ -89,6 +89,35 @@ namespace DouyinLive
 
         // ---------- 换角色 ----------
 
+        // 读 avatars.json，把可切换的角色填进 names/paths（下标一一对应）。
+        // 排除当前正在用的角色和文件已经不在的条目。
+        void LoadAvatarLibrary(List<string> names, List<string> paths)
+        {
+            string current = SaveLoadHandler.Instance != null
+                ? SaveLoadHandler.Instance.data.selectedModelPath : "";
+            try
+            {
+                string jsonPath = System.IO.Path.Combine(Application.persistentDataPath, "avatars.json");
+                if (!System.IO.File.Exists(jsonPath)) return;
+
+                var entries = Newtonsoft.Json.JsonConvert.DeserializeObject<List<AvatarLibraryMenu.AvatarEntry>>(
+                    System.IO.File.ReadAllText(jsonPath));
+                if (entries == null) return;
+
+                foreach (var e in entries)
+                {
+                    if (e == null || string.IsNullOrEmpty(e.filePath)) continue;
+                    if (e.filePath == current || !System.IO.File.Exists(e.filePath)) continue;
+                    names.Add(string.IsNullOrEmpty(e.displayName)
+                        ? System.IO.Path.GetFileNameWithoutExtension(e.filePath)
+                        : e.displayName);
+                    paths.Add(e.filePath);
+                }
+            }
+            catch (System.Exception ex)
+            { Debug.LogWarning("[RewardService] read avatars.json failed: " + ex.Message); }
+        }
+
         public void SwitchRandomAvatar(string userName)
         {
             if (Time.unscaledTime - lastSwitchAt < SwitchCooldown)
@@ -99,25 +128,13 @@ namespace DouyinLive
             if (vrmLoader == null) vrmLoader = UnityEngine.Object.FindFirstObjectByType<VRMLoader>();
             if (vrmLoader == null) return;
 
-            string current = SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data.selectedModelPath : "";
+            var names = new List<string>();
             var candidates = new List<string>();
-            try
-            {
-                string jsonPath = System.IO.Path.Combine(Application.persistentDataPath, "avatars.json");
-                if (System.IO.File.Exists(jsonPath))
-                {
-                    var entries = Newtonsoft.Json.JsonConvert.DeserializeObject<List<AvatarLibraryMenu.AvatarEntry>>(
-                        System.IO.File.ReadAllText(jsonPath));
-                    if (entries != null)
-                        foreach (var e in entries)
-                            if (e != null && !string.IsNullOrEmpty(e.filePath) && e.filePath != current &&
-                                System.IO.File.Exists(e.filePath))
-                                candidates.Add(e.filePath);
-                }
-            }
-            catch (System.Exception ex) { Debug.LogWarning("[RewardService] read avatars.json failed: " + ex.Message); }
+            LoadAvatarLibrary(names, candidates);
 
             // 默认模型也算一个候选（当前不是默认模型时）
+            string current = SaveLoadHandler.Instance != null
+                ? SaveLoadHandler.Instance.data.selectedModelPath : "";
             if (!string.IsNullOrEmpty(current)) candidates.Add("");
 
             if (candidates.Count == 0)
@@ -133,6 +150,40 @@ namespace DouyinLive
             DouyinLiveManager.Instance?.NormalizeNextAvatarHeight();
             if (string.IsNullOrEmpty(pick)) vrmLoader.ActivateDefaultModel();
             else vrmLoader.LoadVRM(pick);
+        }
+
+        // 指名换角色：按 avatars.json 里的 displayName 模糊匹配。
+        // 匹配不上不是失败——说一句然后随机换，观众的请求至少有回应。
+        public void SwitchAvatarByName(string userName, string wanted)
+        {
+            if (string.IsNullOrWhiteSpace(wanted)) { SwitchRandomAvatar(userName); return; }
+
+            var names = new List<string>();
+            var paths = new List<string>();
+            LoadAvatarLibrary(names, paths);
+
+            int idx = NameMatch.PickIndex(names, wanted);
+            if (idx < 0)
+            {
+                Speech?.Enqueue($"衣柜里没有 {wanted} 这个角色哦，随便换一个吧~",
+                                SpeechPipeline.Priority.AIReply, 20f);
+                SwitchRandomAvatar(userName);
+                return;
+            }
+
+            if (Time.unscaledTime - lastSwitchAt < SwitchCooldown)
+            {
+                Speech?.Enqueue("刚换过啦，让我先穿一会儿这身嘛~", SpeechPipeline.Priority.AIReply, 20f);
+                return;
+            }
+            if (vrmLoader == null) vrmLoader = UnityEngine.Object.FindFirstObjectByType<VRMLoader>();
+            if (vrmLoader == null) return;
+
+            lastSwitchAt = Time.unscaledTime;
+            Speech?.Enqueue($"{userName} 想看 {names[idx]} 是吧？看我变身！",
+                            SpeechPipeline.Priority.GiftThanks, 20f);
+            DouyinLiveManager.Instance?.NormalizeNextAvatarHeight();
+            vrmLoader.LoadVRM(paths[idx]);
         }
 
         public void OnGift(DouyinEvent ev)
