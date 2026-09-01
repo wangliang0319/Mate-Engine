@@ -352,11 +352,14 @@ namespace DouyinLive
 
         bool PlaySong(string arg, EffectContext ctx)
         {
+            // ask 只问不点歌，不需要 SongService；放在 s == null 检查之前，
+            // 免得场景里没接点歌服务时连"追问"这个最轻量的动作都跟着失效
+            if (arg == "ask") return AskAndOpenSlot(IntentKind.Song, ctx);
+
             var s = Song;
             if (s == null) { WarnOnce("song"); return false; }
             string name = string.IsNullOrEmpty(ctx.Event?.Nickname) ? "朋友" : ctx.Event.Nickname;
 
-            if (arg == "ask") return AskAndOpenSlot(IntentKind.Song, ctx);
             if (arg != "request") { s.RequestSong(arg, name); return true; }
 
             // song:request 从弹幕正文里剥掉命中的关键词，剩下的就是歌名
@@ -396,14 +399,16 @@ namespace DouyinLive
 
         bool SwapAvatar(string arg, EffectContext ctx)
         {
+            // ask 只问不换人，不需要 DouyinLiveManager；放在 mgr == null 检查之前，
+            // 免得场景里没接管理器时连"追问"这个最轻量的动作都跟着失效
+            if (arg == "ask") return AskAndOpenSlot(IntentKind.Avatar, ctx);
+
             string name = string.IsNullOrEmpty(ctx.Event?.Nickname) ? "朋友" : ctx.Event.Nickname;
             var mgr = DouyinLiveManager.Instance;
             if (mgr == null) { WarnOnce("swapAvatar"); return false; }
 
             // 裸 swapAvatar 保持老行为：随机换。老配置不能因为这次改动变样。
             if (string.IsNullOrEmpty(arg)) { mgr.SwapAvatarFromTrigger(name); return true; }
-
-            if (arg == "ask") return AskAndOpenSlot(IntentKind.Avatar, ctx);
 
             string wanted = arg;
             if (arg == "request")

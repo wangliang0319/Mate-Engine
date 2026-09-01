@@ -165,8 +165,12 @@ namespace DouyinLive
             int idx = NameMatch.PickIndex(names, wanted);
             if (idx < 0)
             {
-                Speech?.Enqueue($"衣柜里没有 {wanted} 这个角色哦，随便换一个吧~",
-                                SpeechPipeline.Priority.AIReply, 20f);
+                // 冷却中说了"随便换一个"，紧接着 SwitchRandomAvatar 又用冷却提示回绝，
+                // 观众听到的是角色自相矛盾——冷却会挡下时就不先开这个空头支票，
+                // 让 SwitchRandomAvatar 自己说那句冷却提示就够了
+                if (Time.unscaledTime - lastSwitchAt >= SwitchCooldown)
+                    Speech?.Enqueue($"衣柜里没有 {wanted} 这个角色哦，随便换一个吧~",
+                                    SpeechPipeline.Priority.AIReply, 20f);
                 SwitchRandomAvatar(userName);
                 return;
             }
