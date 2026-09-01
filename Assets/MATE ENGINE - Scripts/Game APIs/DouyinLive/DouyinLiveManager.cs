@@ -144,7 +144,6 @@ namespace DouyinLive
             idleChatter.AutoSongMinInterval = d.douyinIdleAutoSongMinInterval;
             idleChatter.SongList = d.douyinIdleSongList ?? new List<string>();
             idleChatter.AutoDanceEnabled = d.douyinIdleAutoDanceEnabled;
-            idleChatter.Dance = GetComponent<DanceDirector>();
 
             // 直播期间大头模式保持窗口尺寸不变（窗口突变会导致直播伴侣采集画面裁切错乱）
             if (d.enableDouyinLive)
@@ -164,6 +163,17 @@ namespace DouyinLive
             }
             triggers.debugLog = debugLog;
             if (triggerEffects != null) triggerEffects.debugLog = debugLog;
+
+            // DanceDirector 由上面的 TriggerRouter.Awake 挂载创建，只有到这里才能保证它已存在；
+            // 放在 idleChatter 那段里会在首次 ApplySettings 时取到 null，导致自动跳舞永远不触发
+            var danceDirector = GetComponent<DanceDirector>();
+            idleChatter.Dance = danceDirector;
+            if (danceDirector != null)
+            {
+                danceDirector.danceChainCount = Mathf.Max(1, d.douyinDanceChainCount);
+                danceDirector.danceParticleTheme = d.douyinDanceParticleTheme;
+                danceDirector.portraitSoftZoneRatio = Mathf.Clamp(d.douyinDancePortraitSoftZoneRatio, 0.05f, 0.4f);
+            }
 
             // 竖屏直播窗口：完全由 douyinPortraitAspect 决定，>0 开启、<=0 保持普通窗口
             var portrait = GetComponent<PortraitWindowController>();
