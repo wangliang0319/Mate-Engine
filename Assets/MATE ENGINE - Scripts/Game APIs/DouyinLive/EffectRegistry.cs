@@ -112,7 +112,7 @@ namespace DouyinLive
                 case "bigscreen": return TriggerBigScreen();
                 case "dance":     return PlayDance(arg);
                 case "song":      return PlaySong(arg, ctx);
-                case "swapAvatar":return SwapAvatar(ctx);
+                case "swapAvatar": return SwapAvatar(ctx);
                 case "outfit":    return SwitchOutfit(arg);
                 default:          WarnOnce(id); return false;
             }
