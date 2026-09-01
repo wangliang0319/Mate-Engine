@@ -294,7 +294,15 @@ namespace DouyinLive
             }
 
             int idx = d.FindIndexByTitleFuzzy(arg);
-            if (idx < 0) { Debug.LogWarning($"[Effect] 曲库里没有舞包: {arg}"); return false; }
+            if (idx < 0)
+            {
+                // 走到这里的多半是槽位补全：角色刚问完「想看哪支舞呀」，观众答了个
+                // 曲库里没有的名字，而槽位已经被取走了。默不作声等于角色问了问题又
+                // 无视答案——和 request 分支一样，说一句再随便来一支。
+                // random 分支在上面就返回了，这里不会递归回来。
+                Say($"曲库里还没有 {arg}，先随便来一支吧~");
+                return PlayDance("random", ctx);
+            }
             if (d.PlayIndex(idx)) return true;
             return PlayBuiltinDance();
         }
@@ -360,7 +368,7 @@ namespace DouyinLive
             if (s == null) { WarnOnce("song"); return false; }
             string name = string.IsNullOrEmpty(ctx.Event?.Nickname) ? "朋友" : ctx.Event.Nickname;
 
-            if (arg != "request") { s.RequestSong(arg, name); return true; }
+            if (arg != "request") return PlaySongTitle(s, arg, name);
 
             // song:request 从弹幕正文里剥掉命中的关键词，剩下的就是歌名
             string title = StripKeywords(ctx.Event?.Content ?? "", ctx.Rule);
@@ -368,7 +376,14 @@ namespace DouyinLive
             // 直接掉进 AI 闲聊。现在问的同时开一个槽位等他回答。
             if (string.IsNullOrWhiteSpace(title)) return AskAndOpenSlot(IntentKind.Song, ctx);
 
-            // 曲库里有同名舞包时优先播它：真编舞 + 原曲音频，效果比在线点歌好
+            return PlaySongTitle(s, title, name);
+        }
+
+        // 「点歌 赤伶」和两轮追问答出来的「赤伶」是同一个功能的两条路，表演必须一样，
+        // 所以这段尾巴两处共用：曲库里有同名舞包时优先播它（真编舞 + 原曲音频，
+        // 效果比在线点歌好），没有才退回 SongService。
+        bool PlaySongTitle(SongService s, string title, string name)
+        {
             var d = Dance;
             if (d != null)
             {
