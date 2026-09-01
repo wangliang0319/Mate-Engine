@@ -38,6 +38,7 @@ namespace DouyinLive
             limiter.Now = () => Time.unscaledTime;
             Slots.Now = () => Time.unscaledTime;
             Config = TriggerConfigStore.LoadOrCreate();
+            SyncSlotWindow();
             StartWatching();
         }
 
@@ -75,6 +76,7 @@ namespace DouyinLive
             if (TriggerConfigStore.TryParse(json, out var cfg, out string err))
             {
                 Config = cfg;
+                SyncSlotWindow();
                 Debug.Log($"[Triggers] 已重新加载，共 {Config.rules.Count} 条规则");
                 return ReloadOutcome.Success;
             }
@@ -87,6 +89,7 @@ namespace DouyinLive
         {
             likeTotal = 0;
             limiter.Reset();
+            Slots.Reset();
             director.ResetSession();
         }
 
@@ -144,9 +147,22 @@ namespace DouyinLive
             {
                 nextPruneAt = Time.unscaledTime + 300f;   // 每 5 分钟清一次
                 limiter.PruneUsers(600f);
+                Slots.Prune();
             }
 
             director.Tick(Config.global);
+        }
+
+        void SyncSlotWindow()
+        {
+            if (Config != null && Config.global != null)
+                Slots.Window = Config.global.slotWindowSeconds;
+        }
+
+        // 热重载会换掉 Config，所以这个开关要现读而不是启动时抄一份
+        public bool IntentFallbackEnabled
+        {
+            get { return Config != null && Config.global != null && Config.global.intentFallbackEnabled; }
         }
 
         void OnDestroy()
@@ -193,6 +209,75 @@ namespace DouyinLive
             bool executed = director.Submit(rule, ev, Config.global);
             if (executed) limiter.Commit(rule, Config.global, ev.UserId);
             return executed;
+        }
+
+        // 观众在回答角色刚才的追问。返回 true = 已消费。
+        public bool TryFillSlot(DouyinEvent ev)
+        {
+            if (ev == null || Config == null || ev.Type != DouyinMsgType.Chat) return false;
+            if (!Slots.TryPeek(ev.UserId, out var slot)) return false;
+
+            string arg = (ev.Content ?? "").Trim();
+            // 通不过校验时刻意不 Take：槽位连同开槽时间原样留着，这条弹幕正常
+            // 走闲聊，观众还有机会补答。取出来再放回去会刷新时间戳，连发几个
+            // 「666」就能把 30 秒窗口无限续期。
+            if (!IntentText.IsUsableArg(arg)) return false;
+
+            var rule = FindRuleById(slot.RuleId);
+            if (rule == null || !rule.enabled)
+            {
+                // 主播在追问期间把规则删了/禁用了：丢掉槽位，按普通弹幕处理
+                Slots.Take(ev.UserId);
+                return false;
+            }
+
+            string effect = RuleQuery.BuildEffect(slot.Kind, arg);
+            if (effect == null) { Slots.Take(ev.UserId); return false; }
+
+            Slots.Take(ev.UserId);
+
+            // 刻意不过限流闸。追问的两轮是一次请求的两半，开槽那一次已经过闸
+            // 并记账了。真收第二次费的话，swap 的 60 秒规则冷却和 45 秒 L3 间隔
+            // 会把 30 秒窗口内的回答全部拦死，功能等于不存在。滥用也不成立：
+            // 开槽必须先过闸，一个槽只能被取走一次，净速率和一次命中完全相同。
+            bool executed = director.Submit(RuleQuery.WithEffect(rule, effect), ev, Config.global);
+            if (debugLog)
+                Debug.Log($"[Triggers] 槽位补全 {slot.Kind}:{arg} → {(executed ? "已执行" : "空炮")}");
+            return executed;
+        }
+
+        // 大模型判出了意图，按对应玩法的规则执行。返回 false = 让调用方走原有逻辑。
+        public bool TryHandleIntent(DouyinEvent ev, IntentKind kind, string arg)
+        {
+            if (ev == null || Config == null || kind == IntentKind.None) return false;
+
+            var rule = RuleQuery.FindByEffectPrefix(Config, RuleQuery.EffectPrefix(kind));
+            // 主播把这个玩法的规则删了就是不想要它，别越过配置替他开
+            if (rule == null) return false;
+
+            // 这是一次全新请求，没人付过费，四道闸照走
+            var gate = limiter.Check(rule, Config.global, ev.UserId);
+            if (gate != GateResult.Pass)
+            {
+                if (debugLog) Debug.Log($"[Triggers] 意图 {kind} 被 {gate} 拦下，改走闲聊");
+                return false;
+            }
+
+            // 名字不可用就只问不做：ask 分支会开槽等观众补答
+            string effect = RuleQuery.BuildEffect(
+                kind, IntentText.IsUsableArg(arg) ? arg.Trim() : "ask");
+
+            bool executed = director.Submit(RuleQuery.WithEffect(rule, effect), ev, Config.global);
+            if (executed) limiter.Commit(rule, Config.global, ev.UserId);
+            return executed;
+        }
+
+        TriggerRule FindRuleById(string id)
+        {
+            if (Config == null || Config.rules == null || string.IsNullOrEmpty(id)) return null;
+            foreach (var r in Config.rules)
+                if (r != null && r.id == id) return r;
+            return null;
         }
     }
 }

@@ -274,13 +274,19 @@ namespace DouyinLive
                 like.RecordOnly(ev);   // 会话点赞总数不能因为被触发规则消费而漏计
             }
 
-            if (triggers != null && triggers.TryHandle(ev)) return;
+            if (triggers != null)
+            {
+                // 关键词规则排在槽位补全之前是有意的：观众答的歌名如果恰好叫
+                // 《抱抱》，会命中 love 规则去播飞吻而不是唱歌。宁可漏一次也不
+                // 要乱触发，这个顺序也顺带省掉了「答案是不是另一条命令」那道校验。
+                if (triggers.TryHandle(ev)) return;
+                if (triggers.TryFillSlot(ev)) return;
+            }
 
             switch (ev.Type)
             {
                 case DouyinMsgType.Chat:
-                    if (reward.TryHandleDanmaku(ev)) return;
-                    danmakuAI.OnDanmaku(ev);
+                    HandleChatLegacy(ev);
                     break;
                 case DouyinMsgType.Like:
                     like.OnEvent(ev);
@@ -299,6 +305,14 @@ namespace DouyinLive
                     TriggerBigHeadMoment();   // 礼物 → 大头特写致谢
                     break;
             }
+        }
+
+        // 触发层、槽位、意图判定都没接住的弹幕走这里。抽成方法是因为意图判定
+        // 是异步的：1.5 秒后判不出来，回调要能把这条弹幕补回原路径。
+        void HandleChatLegacy(DouyinEvent ev)
+        {
+            if (reward.TryHandleDanmaku(ev)) return;
+            danmakuAI.OnDanmaku(ev);
         }
 
         // ---------- 大头特写：关注/礼物时镜头推到脸部说感谢，说完恢复 ----------
