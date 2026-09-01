@@ -227,6 +227,11 @@ namespace DouyinLive
             client = null;
             running = false;
             speech.ClearQueue();
+            // 意图判定是 1.5 秒的异步调用，停播时可能还有一次在途；它的回调走
+            // MainThreadDispatcher，不受下面 Update 的 running 早退保护，所以这里
+            // 要把在等的请求和追问槽位一起清掉，别让角色在停播后自己动起来。
+            intents.Reset();
+            if (triggers != null) triggers.ResetSession();
         }
 
         void Update()
@@ -335,6 +340,8 @@ namespace DouyinLive
 
         void OnIntentResolved(DouyinEvent ev, IntentKind kind, string arg)
         {
+            // 停播前发起的判定回来时直播已经结束了，这条回调也绕过了 IsBlocked()
+            if (!running) return;
             if (triggers != null && triggers.TryHandleIntent(ev, kind, arg)) return;
             // 规则不存在或被限流拦下：「我想听首歌」本身是很好的闲聊素材，
             // 让 AI 回一句是体面的降级
