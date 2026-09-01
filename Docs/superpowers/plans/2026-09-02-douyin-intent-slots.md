@@ -373,8 +373,13 @@ namespace DouyinLive.Tests
         [Test]
         public void 超长不可用()
         {
-            Assert.IsTrue(IntentText.IsUsableArg(new string('歌', 25)));
-            Assert.IsFalse(IntentText.IsUsableArg(new string('歌', 26)));
+            // 刻意不用 new string('歌', 25)：那会同时撞上下面的「同字重复」规则，
+            // 测出来的就不是长度边界了。这里用一个不重复的串。
+            const string s22 = "山外小楼夜听雨春眠不觉晓处处闻啼鸟夜来风雨声";
+            Assert.AreEqual(22, s22.Length, "基准串长度变了的话下面两条断言就失去意义");
+
+            Assert.IsTrue(IntentText.IsUsableArg(s22 + "花落知"));    // 25：边界内
+            Assert.IsFalse(IntentText.IsUsableArg(s22 + "花落知多"));  // 26：越界
         }
 
         [Test]
