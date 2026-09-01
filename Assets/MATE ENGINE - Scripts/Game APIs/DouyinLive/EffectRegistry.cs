@@ -114,6 +114,7 @@ namespace DouyinLive
                 case "song":      return PlaySong(arg, ctx);
                 case "swapAvatar": return SwapAvatar(ctx);
                 case "outfit":    return SwitchOutfit(arg);
+                case "sayAI":     return SayAI(arg, ctx);
                 default:          WarnOnce(id); return false;
             }
         }
@@ -367,6 +368,41 @@ namespace DouyinLive
                 if (r.ruleName == arg) { r.isEnabled = !r.isEnabled; return true; }
             WarnOnce("outfit:" + arg);
             return false;
+        }
+
+        // ---------- sayAI ----------
+
+        // 只有礼物 L3 这类低频高价值事件才值得等 1-3 秒换一句定制文案；
+        // 高频事件用 AI 会拖慢反馈节奏并烧 token，所以其余一律用固定模板。
+        bool SayAI(string prompt, EffectContext ctx)
+        {
+            string filled = FillPlaceholders(prompt, ctx.Event);
+            string fallback = FillPlaceholders(
+                string.IsNullOrWhiteSpace(ctx.Rule?.sayFallback)
+                    ? "哇！谢谢 {u} 的 {g}，太感谢啦！"
+                    : ctx.Rule.sayFallback,
+                ctx.Event);
+
+            var mgr = DouyinLiveManager.Instance;
+            if (mgr == null) return Say(fallback);
+
+            bool answered = false;
+            mgr.GenerateFromTrigger(filled, text =>
+            {
+                if (answered) return;
+                answered = true;
+                Say(string.IsNullOrWhiteSpace(text) ? fallback : text);
+            });
+
+            // 3 秒还没回来就先说兜底，绝不让大礼物没有反馈
+            StartCoroutine(SayFallbackIfSilent(3f, () => answered, () => { answered = true; Say(fallback); }));
+            return true;
+        }
+
+        IEnumerator SayFallbackIfSilent(float seconds, System.Func<bool> answered, System.Action fallback)
+        {
+            yield return new WaitForSeconds(seconds);
+            if (!answered()) fallback();
         }
 
         public static string FillPlaceholders(string tpl, DouyinEvent ev)

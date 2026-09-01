@@ -330,6 +330,12 @@ namespace DouyinLive
             reward.SwitchRandomAvatar(userName);
         }
 
+        // 供 EffectRegistry 的 sayAI: 效果使用
+        public void GenerateFromTrigger(string prompt, System.Action<string> onDone)
+        {
+            danmakuAI.GenerateOneShot(prompt, onDone);
+        }
+
         // L2 动作会打断闲聊的暖场话（唱歌/跳舞不受影响）
         public void InterruptIdleChatter()
         {
