@@ -17,6 +17,7 @@
 | 点歌 | 弹幕 `点歌 歌名` | 网易云搜歌 → 播放高潮段 → 跟节奏跳舞 |
 | 换角色 | 弹幕 `换角色` | 随机切换模型库中的 VRM，自动身高归一化 |
 | 玩法菜单 | 弹幕 `菜单` | 口播玩法教学 |
+| 自定义触发 | 配置 `douyin_triggers.json` | 任意关键词/点赞数/礼物档位 → 任意效果组合，改完存盘即生效 |
 | 冷场暖场 | 90 秒无互动 | 自动求赞/求关注/闲聊；冷场 5 分钟自动唱歌 |
 | 直播运营 | 自动 | 每 30 分钟礼物感谢榜、整点报时 |
 | 竖屏直播窗口 | 配置自动 | 按 `douyinPortraitAspect` 切竖屏窗口，适配直播伴侣采集 |
@@ -95,13 +96,67 @@
 | `douyinIdleThreshold` | `90.0` | 多少秒无互动算冷场 |
 | `douyinIdleAutoSongEnabled` | `true` | 深度冷场自动唱歌 |
 | `douyinIdleAutoSongThreshold` | `300.0` | 冷场多少秒后开唱（测试时可临时改 30） |
+| `douyinIdleAutoSongMinInterval` | `600.0` | 两次深度冷场表演的最小间隔 |
+| `douyinIdleAutoDanceEnabled` | `true` | 深度冷场自动跳舞，和唱歌交替 |
+| `douyinDanceChainCount` | `1` | 一次触发连跳几支舞 |
+| `douyinDanceParticleTheme` | `""` | 跳舞期间临时切的粒子主题（留空=不切；目前只有 `Dance Trail Blue`） |
+| `douyinDancePortraitSoftZoneRatio` | `0.15` | 竖屏防出画软边界占屏宽的比例 |
 | `douyinIdleSongList` | 默认18首古风 | 自动唱歌歌单，直接增删歌名；重复项启动时自动去重；空数组=不自动唱 |
+
+`douyinIdleAutoSongEnabled` 以前是整个深度冷场表演的总开关，现在只管唱歌，跳舞由 `douyinIdleAutoDanceEnabled`（默认 `true`）独立控制，升级前关过自动唱歌的人升级后会开始看到自动跳舞。
 
 #### 竖屏直播窗口
 
 | 配置项 | 推荐值 | 说明 |
 |---|---|---|
 | `douyinPortraitAspect` | `0.75` | 窗口宽/高比，**唯一开关**：`>0` 开播即自动切竖屏窗口，`0`（或负数）保持普通桌宠窗口（Unity 会记住上次的窗口尺寸，程序会按窗口大小档位主动改回来）。0.5625=严格9:16；**跳舞走位出画就调大**（0.85~1.0）；配合“角色缩小60~70%+舞台背景”的布局效果最佳 |
+
+#### 自定义触发规则（douyin_triggers.json）
+
+一条规则 = 「什么来源 + 什么条件 → 执行哪些效果」。想让「换角色、换装、换个人」都能换角色，
+就把这三个词写进同一条规则的 `keywords`；想让弹幕和关注都放大屏，就写两条规则、`effects` 都填 `bigscreen`。
+
+**可用效果：**
+
+| 效果 | 说明 |
+|---|---|
+| `anim:<参数名>` | 播一次 Animator 动作。现有参数只有 `Headpat` / `HairStroke` / `HoverFaceTrigger` / `HoverTrigger` / `IntimeRegion`；自己往 Animator 里加了新动画，这里直接写新参数名即可，不用改代码 |
+| `face:Happy` `face:Angry` `face:Cry` `face:Fear` | 面部表情状态 |
+| `mood:happy` `mood:love` `mood:sad` `mood:surprise` | 表情混合形状 |
+| `particle:<主题名>` | 切粒子主题 6 秒后还原。**目前只有 `Dance Trail Blue` 一个主题** |
+| `bigscreen` | 大头特写 |
+| `dance:random` / `dance:<舞名>` / `dance:builtin` | 跳舞。`random` 一轮之内不重复 |
+| `song:<歌名>` / `song:request` | 唱歌。`request` 从弹幕正文里取歌名 |
+| `swapAvatar` | 随机换 VRM 角色，自动身高归一化 |
+| `outfit:random` / `outfit:<配件名>` | 切换配件 |
+| `say:<文本>` | 固定文案，支持 `{u}` 昵称 / `{g}` 礼物名 / `{n}` 数量 |
+| `sayAI:<提示词>` | 让大模型现场生成一句。3 秒没回来就说规则里的 `sayFallback` |
+| `menu` | 口播玩法说明 |
+
+**动作三层：** `L1` 轻叠加（不打断唱歌）/ `L2` 普通互动（唱歌时只出粒子不播动画）/ `L3` 重磅独占。
+
+**防刷屏的四道闸**（一个请求要全部通过才执行，被拦下时日志会写明是哪道）：
+
+| 参数 | 位置 | 作用 |
+|---|---|---|
+| `chatCooldown` / `likeCooldown` / `giftCooldown` | `global` | 该来源的整体节奏 |
+| `perUserCooldown` | `global`（可在规则里覆盖）| 同一观众的间隔。**防刷屏主力**：只冻结他自己，不影响别人 |
+| `cooldown` | 单条规则 | 这个玩法自己的节奏。换角色默认 60 秒 |
+| `l2MinInterval` / `l3MinInterval` | `global` | 跨规则的层级总闸。`l3MinInterval` 默认 45 秒 |
+| `l3QueueSize` | `global` | L3 排队上限，默认 3，满了挤掉最旧的一条 |
+| `l3InterruptSinging` | `global` | 唱歌时 L3 是否可以打断，默认 `false` |
+
+**礼物档位**按 `minDiamond` / `maxDiamond` 配，默认 1-9 / 10-99 / ≥100 抖币，按自己直播间的实际礼物结构调。
+`global.giftUseTotalValue` 为 `true`（默认）时按「单价 × 数量」算，连刷 20 个 1 抖币的小心心会命中中档；
+改成 `false` 则只看单价。
+
+**匹配细节与注意事项：**
+
+- `keywords` 匹配大小写**不敏感**（`OrdinalIgnoreCase`），而 `regex` 走裸 `Regex.IsMatch`，大小写**敏感**。想让正则忽略大小写要自己写 `(?i)`。
+- 不要写 `source: "enter"` 的规则。触发层跑在 `WelcomeLikeServices` 之前，命中后进场事件被消费掉，`Audience.RecordVisit` 就不会执行，「大哥回归 / 老朋友」识别会被永久破坏。默认规则集刻意不含 enter 规则。
+
+改坏了不要紧：解析失败会保留上一份可用配置并在日志里报错，直播间不会哑掉。
+想恢复出厂设置就把文件删掉重启。
 
 #### 个性化数据文件（同目录，首次运行自动生成）
 
@@ -111,6 +166,7 @@
 | `douyin_blocked_words.txt` | 敏感词表（一行一词，# 开头为注释）。AI 输出含词即静默丢弃，挑衅弹幕不接茬——**直播合规，建议按需补充** |
 | `douyin_audience.json` | 观众记忆（自动维护勿手改）：来访次数/礼物总额/最近弹幕 |
 | `douyin_gift_rules.json` | 礼物规则：`{"giftName":"玫瑰","minDiamond":0,"minCount":1,"action":"randomDance"}`，action 可选 `thanks`/`randomDance`/`builtinDance`/`dance:舞名` |
+| `douyin_triggers.json` | **触发规则总表**：谁触发、触发什么、多久能触发一次。首次运行自动生成，文件头部有完整注释。改完存盘即生效（无需重启）。详见上面的「自定义触发规则」一节 |
 
 #### 程序内快捷键
 
