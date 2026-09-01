@@ -64,5 +64,39 @@ namespace DouyinLive.Tests
                     if (e.StartsWith("particle:"))
                         Assert.IsTrue(known.Contains(e.Substring(9)), $"规则 {r.id} 用了不存在的粒子主题");
         }
+
+        [Test]
+        public void 新增的全局字段有合理默认值()
+        {
+            var g = new TriggerGlobal();
+            Assert.AreEqual(30f, g.slotWindowSeconds);
+            Assert.IsTrue(g.intentFallbackEnabled);
+        }
+
+        [Test]
+        public void 规则的追问文案默认为空表示用内置文案()
+        {
+            Assert.AreEqual("", new TriggerRule().askPrompt);
+        }
+
+        [Test]
+        public void 默认规则集里点舞和换角色都支持追问()
+        {
+            var cfg = TriggerConfig.Defaults();
+            var dance = cfg.rules.Find(r => r.id == "reqdance");
+            var swap = cfg.rules.Find(r => r.id == "swap");
+            Assert.IsNotNull(dance);
+            Assert.IsNotNull(swap);
+            Assert.Contains("dance:request", dance.effects);
+            Assert.Contains("swapAvatar:request", swap.effects);
+        }
+
+        [Test]
+        public void 默认规则集里点歌仍然是request()
+        {
+            var song = TriggerConfig.Defaults().rules.Find(r => r.id == "song");
+            Assert.IsNotNull(song);
+            Assert.Contains("song:request", song.effects);
+        }
     }
 }

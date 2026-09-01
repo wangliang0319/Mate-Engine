@@ -99,6 +99,8 @@ namespace DouyinLive
 "//   perUserCooldown  同一观众的间隔，防单人刷屏的主力（只冻结他自己）\n" +
 "//   cooldown         写在单条规则里，该玩法自己的节奏\n" +
 "//   l2MinInterval / l3MinInterval  跨规则的层级总闸\n" +
+"//   slotWindowSeconds  追问后等观众回答的秒数，0 = 关闭追问\n" +
+"//   intentFallbackEnabled  关键词没中时是否问大模型判意图\n" +
 "//\n" +
 "// source: chat|like|follow|gift|enter|share\n" +
 "// level:  L1 轻叠加(不打断唱歌) | L2 普通互动(唱歌时只出粒子) | L3 重磅独占\n" +
@@ -111,9 +113,13 @@ namespace DouyinLive
 "//   mood:happy|love|sad|surprise\n" +
 "//   particle:<主题名>       目前只有 \"Dance Trail Blue\" 一个主题\n" +
 "//   bigscreen               大头特写\n" +
-"//   dance:random | dance:<舞名> | dance:builtin\n" +
-"//   song:<歌名> | song:request\n" +
-"//   swapAvatar | outfit:random | outfit:<配件名>\n" +
+"//   dance:random | dance:<舞名> | dance:builtin | dance:request | dance:ask\n" +
+"//   song:<歌名> | song:request | song:ask\n" +
+"//   swapAvatar | swapAvatar:<角色名> | swapAvatar:request | swapAvatar:ask\n" +
+"//   outfit:random | outfit:<配件名>\n" +
+"//   request = 先从弹幕正文取名字，取不到就追问并等这个观众下一句回答\n" +
+"//   ask     = 不看正文，直接追问\n" +
+"//   规则可加 askPrompt 自定义追问文案（支持 {u}），留空用内置默认\n" +
 "//   say:<文本> | sayAI:<给AI的提示> | menu\n" +
 "//   say 支持占位符 {u}=昵称 {g}=礼物名 {n}=数量\n" +
 "//\n" +

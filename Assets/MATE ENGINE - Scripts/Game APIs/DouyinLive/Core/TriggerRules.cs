@@ -15,6 +15,10 @@ namespace DouyinLive
         public int l3QueueSize = 3;
         public bool l3InterruptSinging = false;
         public bool giftUseTotalValue = true; // true=单价×数量 false=只看单价
+        // 角色问完「想听什么歌呀」之后，等这个观众回答的秒数。<= 0 关闭追问功能。
+        public float slotWindowSeconds = 30f;
+        // 关键词没命中时，是否花 1.5 秒问一次大模型这条弹幕想干嘛
+        public bool intentFallbackEnabled = true;
     }
 
     public class TriggerRule
@@ -40,6 +44,7 @@ namespace DouyinLive
         public float cooldown = 0f;          // 本规则独立冷却
         public float perUserCooldown = -1f;  // -1 = 跟随 global
         public string sayFallback = "";      // sayAI: 失败时的兜底文案
+        public string askPrompt = "";        // 追问文案，留空用内置默认；支持 {u}
 
         // 1/2/3。写错或留空一律当 L1，宁可效果轻也不要意外独占画面。
         public int LevelOrDefault
@@ -82,8 +87,8 @@ namespace DouyinLive
                     // ---- 弹幕特殊指令 ----
                     Chat("menu", new[] { "菜单", "玩法" }, new[] { "menu" }, "L1"),
                     Chat("song", new[] { "点歌" },         new[] { "song:request" }, "L1"),
-                    Cd(Chat("swap", new[] { "换角色", "换装", "换个人" }, new[] { "swapAvatar" }, "L3"), 60f, 180f),
-                    Cd(Chat("reqdance", new[] { "点舞", "跳舞", "来一段" }, new[] { "dance:random" }, "L3"), 90f, 300f),
+                    Cd(Chat("swap", new[] { "换角色", "换装", "换个人" }, new[] { "swapAvatar:request" }, "L3"), 60f, 180f),
+                    Cd(Chat("reqdance", new[] { "点舞", "跳舞", "来一段" }, new[] { "dance:request" }, "L3"), 90f, 300f),
 
                     // ---- 点赞 ----
                     new TriggerRule
