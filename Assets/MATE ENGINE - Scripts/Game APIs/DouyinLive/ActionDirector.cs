@@ -17,7 +17,15 @@ namespace DouyinLive
         AvatarDanceHandler dance;
 
         float l3StartedAt;
+        bool l3EverBusy;                   // 本次 L3 期间是否观测到过「在唱 / 在跳」
         const float L3MaxSeconds = 180f;   // 兜底：舞包异常没回调时也要放开独占
+
+        // 派发效果到真的出声/起舞之间有加载延迟：自定义舞包要从磁盘读音频和动作，
+        // 这段时间 Song/Dance 的 IsPlaying 都还是 false。宽限期太短会在舞还没起来时
+        // 就放开独占位，下一条排队的 L3 立刻出队，两个重磅效果叠在一起播——正是这层
+        // 仲裁要防的事。宽限期取 8 秒不会拖慢节奏：l3MinInterval 默认 45 秒，
+        // 真正决定重磅效果间隔的是它，不是这里的独占时长。
+        const float L3StartupGrace = 8f;
 
         void Awake()
         {
@@ -85,12 +93,16 @@ namespace DouyinLive
         {
             Arbiter.SingingNow = Song != null && Song.IsPlaying;
 
-            // L3 结束判定：既不在唱也不在跳，或超过兜底时长
+            // L3 结束判定：观测到过在唱/在跳就等它停，从没忙起来过则等宽限期，
+            // 两者都不成立时靠兜底时长兜住
             if (Arbiter.L3Busy)
             {
                 bool busy = (Song != null && Song.IsPlaying) || (Dance != null && Dance.IsPlaying);
-                if (!busy && Time.unscaledTime - l3StartedAt > 2f) Arbiter.NotifyL3Finished();
-                else if (Time.unscaledTime - l3StartedAt > L3MaxSeconds)
+                if (busy) l3EverBusy = true;
+                float elapsed = Time.unscaledTime - l3StartedAt;
+
+                if (!busy && (l3EverBusy || elapsed > L3StartupGrace)) Arbiter.NotifyL3Finished();
+                else if (elapsed > L3MaxSeconds)
                 {
                     Debug.LogWarning("[Director] L3 超过兜底时长仍未结束，强制放开独占");
                     Arbiter.NotifyL3Finished();
@@ -111,7 +123,7 @@ namespace DouyinLive
         // 否则逻辑或但不短路——每个效果都要尝试执行一遍。
         bool Execute(ActionRequest req, DouyinEvent ev)
         {
-            if (req.Rule.LevelOrDefault == 3) l3StartedAt = Time.unscaledTime;
+            if (req.Rule.LevelOrDefault == 3) { l3StartedAt = Time.unscaledTime; l3EverBusy = false; }
 
             // L2 打断闲聊的暖场话（不打断唱歌/跳舞）
             if (req.Rule.LevelOrDefault == 2)

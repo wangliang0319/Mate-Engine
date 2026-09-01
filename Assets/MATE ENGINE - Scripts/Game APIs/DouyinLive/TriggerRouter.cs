@@ -15,7 +15,6 @@ namespace DouyinLive
 
         public TriggerConfig Config { get; private set; }
 
-        EffectRegistry effects;
         ActionDirector director;
         readonly TriggerLimiter limiter = new TriggerLimiter();
 
@@ -33,7 +32,6 @@ namespace DouyinLive
 
         void Awake()
         {
-            effects = GetComponent<EffectRegistry>();
             director = GetComponent<ActionDirector>();
             if (director == null) director = gameObject.AddComponent<ActionDirector>();
             limiter.Now = () => Time.unscaledTime;
