@@ -46,6 +46,9 @@ namespace DouyinLive
                                Action<DouyinEvent> onGiveUp)
         {
             if (ev == null || onResolved == null || onGiveUp == null) return false;
+            // 本地预筛先做：非点播弹幕不该产生任何 [IntentResolver] 日志，
+            // 不然「后端不可用」的提示会在每条闲聊弹幕上刷一遍
+            if (IntentText.LooksLikeIntent(ev.Content) == IntentKind.None) return false;
             if (Cloud == null || !Cloud.IsAvailable)
             {
                 // 和「预筛没命中」区分开：这条日志代表设置页没配云端后端/本地 LLM
@@ -53,8 +56,6 @@ namespace DouyinLive
                 if (debugLog) Debug.Log("[IntentResolver] 云端后端未配置或不可用，本条弹幕不走意图兜底");
                 return false;
             }
-            // 本地预筛：没有任何点播痕迹的弹幕不值得花 token
-            if (IntentText.LooksLikeIntent(ev.Content) == IntentKind.None) return false;
             if (inFlight >= MaxInFlight) return false;
 
             string uid = ev.UserId ?? "";
@@ -68,7 +69,9 @@ namespace DouyinLive
             }
 
             inFlight++;
-            _ = ResolveAsync(ev, onResolved, onGiveUp);
+            // 丢弃的 Task 里逃出来的异常没人接，观测一下免得进 UnobservedTaskException。
+            _ = ResolveAsync(ev, onResolved, onGiveUp)
+                    .ContinueWith(t => { _ = t.Exception; }, TaskScheduler.Default);
             return true;
         }
 
