@@ -68,12 +68,33 @@
 | 配置项 | 推荐值 | 说明 |
 |---|---|---|
 | `ttsProvider` | `0` | 0=云端 OpenAI 兼容；1=EdgeTTS（**已被微软封禁勿用**）；3=纯字幕无语音 |
-| `ttsBaseUrl` / `ttsApiKey` | `""` | 留空自动复用 aiBaseUrl / aiApiKey |
-| `ttsModel` | `"gpt-4o-mini-tts"` | 实测 1.6 秒返回，支持风格指令 |
-| `ttsVoice` | `"shimmer"` | 甜美女声；候选 coral / nova / sage |
-| `ttsInstructions` | 见下 | **消除中文洋腔的关键**，示例："你是一个20岁左右的中国甜美少女主播，声音清脆软糯、音调偏高，语气活泼带一点撒娇，说标准普通话，绝对不能有外国口音" |
-| `ttsVolume` / `ttsSpeed` | `1.0` / `1.0` | 音量 / 语速 |
+| `ttsBaseUrl` / `ttsApiKey` | 见下 | 留空才复用 aiBaseUrl / aiApiKey。**TTS 和大模型可以是两家**，聊天用中转站、语音用专门的 TTS 服务是推荐配法 |
+| `ttsModel` | `"FunAudioLLM/CosyVoice2-0.5B"` | 硅基流动，中文母语训练，流式延迟 150ms，约 $7.15/百万 UTF-8 字节（1000 汉字≈¥0.15） |
+| `ttsVoice` | `"diana"` | CosyVoice2 预置 8 音色，女声：`diana` 欢快 / `claire` 温柔 / `bella` 激情 / `anna` 沉稳；男声：`alex` / `benjamin` / `charles` / `david` |
+| `ttsInstructions` | 见下 | 风格指令，**只有 `gpt-4o-mini-tts` 这类带 `instructions` 字段的模型认**，CosyVoice 会忽略。示例："你是一个20岁左右的中国甜美少女主播，声音清脆软糯、音调偏高，语气活泼带一点撒娇，说标准普通话，绝对不能有外国口音" |
+| `ttsVolume` / `ttsSpeed` | `1.0` / `1.0` | 音量 / 语速（CosyVoice2 语速范围 0.25~4.0） |
 | `lipSyncGain` | `1.0` | 口型幅度，嘴张不开调大 |
+
+**为什么单独配 TTS 服务**：很多 OpenAI 中转站只转发文本模型，`/v1/audio/speech` 要么没有通道、
+要么返回 `not implemented`（模型列表里挂着 TTS 模型也一样，那只是列表）。语音出不来但文本正常，
+基本就是这个原因。换一家专门做 TTS 的服务填进 `ttsBaseUrl` / `ttsApiKey` 即可，不影响聊天走原来的中转站。
+
+配硅基流动要改的几行：
+
+```json
+"ttsProvider": 0,
+"ttsBaseUrl": "https://api.siliconflow.cn/v1",
+"ttsApiKey": "sk-你在硅基流动申请的key",
+"ttsModel": "FunAudioLLM/CosyVoice2-0.5B",
+"ttsVoice": "diana"
+```
+
+CosyVoice 系列和 OpenAI 的请求形状有两处差异：
+`voice` 实际要发 `模型名:音色名`（只写 `diana` 会报 `Invalid voice`，程序已自动补全前缀，配置里照常只写音色名）；
+它没有 `instructions` 字段，**所以配 CosyVoice 时 `ttsInstructions` 不起作用**，音调语气只能靠 `ttsVoice` 挑音色。
+官方文档提到可以用 `<|endofprompt|>` 把风格指令拼进正文，但硅基流动的部署实测不认这个标记——
+同一句 13 字的话，纯正文合成 1.66 秒，拼上指令后变成 9.7~24 秒，指令被当成正文念了出来，
+所以程序会直接丢弃 `ttsInstructions`。想要甜美音就选 `diana`，想要温柔就选 `claire`。
 
 #### 互动行为
 
@@ -101,6 +122,7 @@
 | `douyinDanceChainCount` | `1` | 一次触发连跳几支舞 |
 | `douyinDanceParticleTheme` | `""` | 跳舞期间临时切的粒子主题（留空=不切；目前只有 `Dance Trail Blue`） |
 | `douyinDancePortraitSoftZoneRatio` | `0.15` | 竖屏防出画软边界占屏宽的比例 |
+| `douyinSongLoudness` | `0.055` | 唱歌响度。歌曲播放前会统一归一化到这个 RMS，嫌轻调大、嫌吵调小 |
 | `douyinIdleSongList` | 默认18首古风 | 自动唱歌歌单，直接增删歌名；重复项启动时自动去重；空数组=不自动唱 |
 
 `douyinIdleAutoSongEnabled` 以前是整个深度冷场表演的总开关，现在只管唱歌，跳舞由 `douyinIdleAutoDanceEnabled`（默认 `true`）独立控制，升级前关过自动唱歌的人升级后会开始看到自动跳舞。
@@ -200,6 +222,7 @@ python Tools/douyin_mock_server.py        # 模拟弹幕服务器
 ## 已知限制
 
 - EdgeTTS 免费接口已被微软封禁（2026-08 实测 403），默认使用云端 TTS
+- 多数 OpenAI 中转站不提供 `/v1/audio/speech` 通道，TTS 建议单独配 `ttsBaseUrl`
 - 网易云点歌只能播非 VIP 版本（通常为翻唱版）
 - 弹幕抓取依赖 DouyinBarrageGrab 的系统代理机制，抖音协议变更可能需要更新该工具
 
