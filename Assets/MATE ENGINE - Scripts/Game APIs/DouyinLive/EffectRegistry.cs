@@ -24,6 +24,9 @@ namespace DouyinLive
         AvatarParticleHandler particles;
 
         string particleThemeBeforeOverride;
+        bool particleOverridden;   // 记录“这次是否真的覆盖过”，而不是靠还原值非空判断——
+                                   // 用户把粒子关掉时 selectedTheme 本来就是空字符串，
+                                   // 空值判断会导致还原被跳过、覆盖值永久卡住
         Coroutine particleRestore;
 
         // mood: 效果的可见时长。要长到在直播画面里能被观众看清楚，
@@ -60,8 +63,9 @@ namespace DouyinLive
             {
                 StopCoroutine(particleRestore);
                 particleRestore = null;
-                if (particles != null && !string.IsNullOrEmpty(particleThemeBeforeOverride))
+                if (particleOverridden && particles != null)
                     particles.SetTheme(particleThemeBeforeOverride);
+                particleOverridden = false;
             }
         }
 
@@ -202,6 +206,7 @@ namespace DouyinLive
 
             if (particleRestore == null) particleThemeBeforeOverride = ph.selectedTheme;
             else StopCoroutine(particleRestore);
+            particleOverridden = true;
 
             ph.SetTheme(theme);
             particleRestore = StartCoroutine(RestoreParticleAfter(6f));
@@ -212,8 +217,9 @@ namespace DouyinLive
         {
             yield return new WaitForSeconds(seconds);
             var ph = Particles;
-            if (ph != null && !string.IsNullOrEmpty(particleThemeBeforeOverride))
+            if (particleOverridden && ph != null)
                 ph.SetTheme(particleThemeBeforeOverride);
+            particleOverridden = false;
             particleRestore = null;
         }
 

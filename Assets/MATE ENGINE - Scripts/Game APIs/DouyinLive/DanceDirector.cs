@@ -3,22 +3,46 @@ using CustomDancePlayer;
 
 namespace DouyinLive
 {
-    // 舞蹈编排：洗牌轮播 + 连播。表演增强（粒子/防出画）在 Task 12 补上。
+    // 舞蹈编排：洗牌轮播 + 连播 + 表演增强（跳舞期间切粒子主题、竖屏下防出画）。
     public class DanceDirector : MonoBehaviour
     {
         public bool debugLog = false;
         public int danceChainCount = 1;   // 一次触发连跳几支
+
+        public string danceParticleTheme = "";   // 留空 = 不切粒子主题
+        [Range(0.05f, 0.4f)] public float portraitSoftZoneRatio = 0.15f;
 
         readonly ShuffleBag bag = new ShuffleBag();
         AvatarDanceHandler dance;
         int chainRemaining;
         bool wasPlaying;
 
+        AvatarParticleHandler particles;
+        AvatarDanceSafetyZone safety;
+        PortraitWindowController portrait;
+
+        string themeBefore;
+        bool safetyEnabledBefore, moveWindowBefore;
+        float softLeftBefore, softRightBefore;
+        bool decorated;
+        bool particleOverridden, safetyOverridden;
+
+        // dance 找到之前每 2 秒重扫一次场景。FindFirstObjectByType(..., Include)
+        // 是全场景扫描（含未激活对象），代价不小，不能每帧做；节流期内 Dance 会
+        // 短暂返回 null，PlayRandom 因此退化到内置动画 —— 这只发生在头像还没
+        // 加载完的开局阶段，下一次重扫命中后自动恢复，无需额外处理。
+        float danceScanCooldown;
+
         AvatarDanceHandler Dance
         {
             get
             {
-                if (dance == null) dance = FindFirstObjectByType<AvatarDanceHandler>(FindObjectsInactive.Include);
+                if (dance == null)
+                {
+                    if (Time.unscaledTime < danceScanCooldown) return null;
+                    dance = FindFirstObjectByType<AvatarDanceHandler>(FindObjectsInactive.Include);
+                    if (dance == null) danceScanCooldown = Time.unscaledTime + 2f;
+                }
                 return dance;
             }
         }
@@ -47,15 +71,11 @@ namespace DouyinLive
 
         void Update()
         {
-            // Dance 的 getter 在缓存失效时会做一次 FindFirstObjectByType 全场景扫描
-            // （含未激活对象），代价不小。danceChainCount 默认是 1，chainRemaining
-            // 平时恒为 0，没有连播要处理时提前退出，避免每帧白扫一次。连播链本身
-            // 不受影响：触发它要求 wasPlaying 曾经被观测为 true，只有真的调用过
-            // PlayRandom 并把 chainRemaining 置为正数之后才会发生。
-            if (chainRemaining <= 0) { wasPlaying = false; return; }
-
             var d = Dance;
             bool playing = d != null && d.IsPlaying;
+
+            if (playing && !decorated) BeginPerformance();
+            if (!playing && decorated) EndPerformance();
 
             // 一支跳完 → 若还有连播次数就接着来一支
             if (wasPlaying && !playing && chainRemaining > 0)
@@ -72,5 +92,66 @@ namespace DouyinLive
             PlayRandom();
             chainRemaining = keep;   // PlayRandom 会重置连播计数，这里保住剩余次数
         }
+
+        void BeginPerformance()
+        {
+            decorated = true;
+
+            // 粒子：记录用户原本选的主题，跳完必须还原，否则会悄悄改掉他的设置
+            if (!string.IsNullOrEmpty(danceParticleTheme))
+            {
+                if (particles == null) particles = FindFirstObjectByType<AvatarParticleHandler>(FindObjectsInactive.Include);
+                if (particles != null)
+                {
+                    themeBefore = particles.selectedTheme;
+                    particles.SetTheme(danceParticleTheme);
+                    particleOverridden = true;
+                }
+            }
+
+            // 防出画：只在竖屏直播时开。AvatarDanceSafetyZone 默认会跟着平移系统窗口，
+            // 而直播伴侣是按窗口采集的，窗口一漂画面就毁了 —— 必须强制关掉。
+            if (portrait == null) portrait = FindFirstObjectByType<PortraitWindowController>();
+            if (portrait == null || !portrait.Active) return;
+
+            if (safety == null) safety = FindFirstObjectByType<AvatarDanceSafetyZone>(FindObjectsInactive.Include);
+            if (safety == null) return;
+
+            safetyEnabledBefore = safety.enableSafety;
+            moveWindowBefore = safety.moveWindowAlong;
+            softLeftBefore = safety.softZoneLeftPx;
+            softRightBefore = safety.softZoneRightPx;
+            safetyOverridden = true;
+
+            safety.moveWindowAlong = false;
+            float soft = Screen.width * portraitSoftZoneRatio;
+            safety.softZoneLeftPx = soft;
+            safety.softZoneRightPx = soft;
+            safety.SetSafetyEnabled(true);
+        }
+
+        void EndPerformance()
+        {
+            decorated = false;
+
+            if (particleOverridden && particles != null)
+            {
+                particles.SetTheme(themeBefore);
+                themeBefore = null;
+            }
+            particleOverridden = false;
+
+            if (safetyOverridden && safety != null)
+            {
+                safety.SetSafetyEnabled(safetyEnabledBefore);
+                safety.moveWindowAlong = moveWindowBefore;
+                safety.softZoneLeftPx = softLeftBefore;
+                safety.softZoneRightPx = softRightBefore;
+            }
+            safetyOverridden = false;
+        }
+
+        // 播放中被强制销毁（换角色/退出）时也要还原，否则用户设置被永久改掉
+        void OnDisable() { if (decorated) EndPerformance(); }
     }
 }
