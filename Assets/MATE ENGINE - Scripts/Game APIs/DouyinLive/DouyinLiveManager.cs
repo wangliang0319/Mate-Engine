@@ -38,6 +38,7 @@ namespace DouyinLive
         bool audienceLoaded;
         TriggerRouter triggers;
         EffectRegistry triggerEffects;
+        readonly IntentResolver intents = new IntentResolver();
 
         CloudChatBackend cloudBackend;
         LocalChatBackend localBackend;
@@ -163,6 +164,8 @@ namespace DouyinLive
                 if (triggers == null) triggers = gameObject.AddComponent<TriggerRouter>();
             }
             triggers.debugLog = debugLog;
+            intents.Cloud = cloudBackend;
+            intents.debugLog = debugLog;
             if (triggerEffects != null) triggerEffects.debugLog = debugLog;
 
             // DanceDirector 由上面的 TriggerRouter.Awake 挂载创建，只有到这里才能保证它已存在；
@@ -214,6 +217,7 @@ namespace DouyinLive
             danmakuAI.ResetSession();
             idleChatter.ResetSession();
             if (triggers != null) triggers.ResetSession();
+            intents.Reset();
             if (debugLog) Debug.Log("[DouyinLive] Started, connecting " + url);
         }
 
@@ -287,6 +291,16 @@ namespace DouyinLive
                 if (!RewardService.IsDanmakuCommand(ev.Content) && triggers.TryFillSlot(ev)) return;
             }
 
+            // 关键词和槽位都没接住：本地预筛命中的才去问大模型。异步，所以命中就
+            // 当场消费掉这条弹幕，判不出来再由回调补回 HandleChatLegacy ——
+            // 否则会出现「先闲聊回一句、一秒后又开始唱歌」的双重响应。
+            // 排除 RewardService 命令：「点歌 晴天」会命中 LooksLikeIntent(「歌」)，
+            // 不挡住的话每条命令都会先烧一次 LLM 调用，再抢 RewardService 的活。
+            if (ev.Type == DouyinMsgType.Chat && !RewardService.IsDanmakuCommand(ev.Content) &&
+                triggers != null && triggers.IntentFallbackEnabled &&
+                intents.TryResolve(ev, OnIntentResolved, HandleChatLegacy))
+                return;
+
             switch (ev.Type)
             {
                 case DouyinMsgType.Chat:
@@ -317,6 +331,14 @@ namespace DouyinLive
         {
             if (reward.TryHandleDanmaku(ev)) return;
             danmakuAI.OnDanmaku(ev);
+        }
+
+        void OnIntentResolved(DouyinEvent ev, IntentKind kind, string arg)
+        {
+            if (triggers != null && triggers.TryHandleIntent(ev, kind, arg)) return;
+            // 规则不存在或被限流拦下：「我想听首歌」本身是很好的闲聊素材，
+            // 让 AI 回一句是体面的降级
+            HandleChatLegacy(ev);
         }
 
         // ---------- 大头特写：关注/礼物时镜头推到脸部说感谢，说完恢复 ----------
