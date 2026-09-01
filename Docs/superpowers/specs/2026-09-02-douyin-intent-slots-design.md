@@ -122,7 +122,14 @@ public static IntentKind LooksLikeIntent(string s);
 public static bool TryParseIntentJson(string raw, out IntentKind kind, out string arg);
 ```
 
-**`IsUsableArg`** —— 这段文本能不能当歌名/舞名/角色名用。拒绝：空白；长度 > 25；纯数字；纯标点/纯表情（去掉标点、空白、Emoji 代理对之后没有剩余字符）。这道校验挡掉「666」「？？？」「哈哈哈哈」这类接在追问后面的无意义弹幕，槽位保留到过期。
+**`IsUsableArg`** —— 这段文本能不能当歌名/舞名/角色名用。拒绝：
+
+- 空白，或长度 > 25
+- **同一个字重复**（长度 ≥ 2 且所有字符相同）——「哈哈哈哈」「？？？」「。。。」是情绪不是答案
+- 纯数字——「666」
+- 没有任何字母或数字——「？！」「😀😭」（Emoji 是代理对，`char.IsLetterOrDigit` 对两半都返回 false，所以纯表情自然落在这一条里，不用单独判）
+
+单字不拦：「刺」「浪」都可能是真歌名。这道校验挡掉接在追问后面的无意义弹幕，槽位保留到过期。
 
 **`LooksLikeIntent`** —— 本地预筛，**只决定这条弹幕值不值得问 LLM**。`IntentResolver` 只看它是不是 `None`，返回的具体类别**不参与最终判定**——那是 LLM 的活。所以词表重叠（「换个歌」既含 Avatar 的「换个」又含 Song 的「歌」）不会导致误判，最多让一条本该问的弹幕被问、一条不该问的被跳过。返回第一个命中的类别，词表按「舞 → 角色 → 歌」的顺序判：
 
@@ -163,7 +170,7 @@ public static int PickIndex(IReadOnlyList<string> names, string query);
 public class IntentResolver
 {
     public IChatBackend Cloud;
-    public bool Enabled = true;
+    public bool debugLog;
     public void Reset();
     // 返回 true = 已接管这条弹幕，调用方不要再走 legacy
     public bool TryResolve(DouyinEvent ev, Action<DouyinEvent, IntentKind, string> onResolved,
@@ -179,10 +186,12 @@ public class IntentResolver
 
   `history` 传空列表，`onDelta` 传 null。
 - 超时 1.5 秒（`CancellationTokenSource`），回调经 `MainThreadDispatcher` 转主线程。
-- **三道自己的闸**（在发请求之前判，判不过直接 `onGiveUp`）：
-  - `Enabled == false`（对应 `global.intentFallbackEnabled`）或 `Cloud.IsAvailable == false`
+- **三道自己的闸**（在发请求之前判，判不过直接返回 false 走原路径）：
+  - `Cloud == null` 或 `Cloud.IsAvailable == false`
   - 同一 `userId` 15 秒内已问过一次
   - 全局同时在飞的请求 ≥ 2
+
+  `global.intentFallbackEnabled` 这个总开关**不放在 `IntentResolver` 里**，而是由 `TriggerRouter.IntentFallbackEnabled` 现读 `Config` 暴露、`Route()` 调用前判——配置热重载会整个换掉 `Config` 对象，启动时抄一份就再也不会更新了。
 - 输出**只当数据用**：只取 `intent` 和 `arg`，`arg` 过一遍 `IntentText.IsUsableArg` 才使用。模型返回的文本永远不会被当成指令执行。
 
 #### `TriggerRouter.cs`
@@ -215,6 +224,9 @@ public void OpenSlot(DouyinEvent ev, IntentKind kind, string ruleId);      // Ef
 | `swapAvatar` | 随机换。**和现在完全一样，老配置不受影响** |
 | `swapAvatar:<角色名>` | 按 `displayName` 模糊匹配 |
 | `swapAvatar:request` | 从正文剥关键词取名字；取不到就追问 + 开槽 |
+| `swapAvatar:ask` | 不看正文，直接追问 + 开槽 |
+
+`song` 和 `dance` 同样各多一个 `:ask`。**`ask` 和 `request` 必须分开**：LLM 判出「想听歌但没说歌名」时要的是直接追问，若复用 `request`，`StripKeywords` 会把「我想听点音乐」整句当歌名拿去搜——那条弹幕根本没命中关键词，没有词可剥。
 
 追问文案默认值（规则的 `askPrompt` 留空时用），措辞要引导「直接发名字」——因为现在直接发真的有用了：
 
@@ -313,8 +325,8 @@ Unity batchmode 编译零 `error CS`（注意先关掉编辑器，否则 `Temp/U
 |---|---|---|
 | 1 | `Core/IntentSlots.cs` + 测试 | 槽位表 |
 | 2 | `Core/IntentText.cs` + 测试 | 三个纯函数 |
-| 3 | `Core/RuleQuery.cs` + `Core/NameMatch.cs` + 测试 | 规则反查与副本 |
-| 4 | 配置 schema：两个 global 字段 + `askPrompt` + 默认规则集升级 + 文件头注释 | 配置层 |
+| 3 | 配置 schema：两个 global 字段 + `askPrompt` + 默认规则集升级 + 文件头注释 | 配置层 |
+| 4 | `Core/RuleQuery.cs` + `Core/NameMatch.cs` + 测试 | 规则反查与副本（`WithEffect` 要拷 `askPrompt`，所以排在配置之后） |
 | 5 | `EffectRegistry` 三个效果改造 + `RewardService.SwitchAvatarByName` + `DouyinLiveManager` 重载 | 效果层 |
 | 6 | `TriggerRouter.TryFillSlot/TryHandleIntent/OpenSlot` + `Route()` 改造 + `HandleChatLegacy` | 路由层（到这里第 1~8 条手工用例应全通） |
 | 7 | `IntentResolver` + 接线 + README 更新 | LLM 兜底（第 9~12 条） |
