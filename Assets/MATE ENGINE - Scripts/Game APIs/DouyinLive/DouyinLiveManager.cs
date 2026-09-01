@@ -141,7 +141,10 @@ namespace DouyinLive
             idleChatter.IdleThreshold = d.douyinIdleThreshold;
             idleChatter.AutoSongEnabled = d.douyinIdleAutoSongEnabled;
             idleChatter.AutoSongIdleThreshold = d.douyinIdleAutoSongThreshold;
+            idleChatter.AutoSongMinInterval = d.douyinIdleAutoSongMinInterval;
             idleChatter.SongList = d.douyinIdleSongList ?? new List<string>();
+            idleChatter.AutoDanceEnabled = d.douyinIdleAutoDanceEnabled;
+            idleChatter.Dance = GetComponent<DanceDirector>();
 
             // 直播期间大头模式保持窗口尺寸不变（窗口突变会导致直播伴侣采集画面裁切错乱）
             if (d.enableDouyinLive)

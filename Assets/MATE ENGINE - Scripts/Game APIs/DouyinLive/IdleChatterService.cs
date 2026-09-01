@@ -22,10 +22,15 @@ namespace DouyinLive
         public float AutoSongMinInterval = 600f;     // 两首自动歌最少隔10分钟
         public List<string> SongList = new List<string>();
 
+        // 深度冷场自动跳舞：和唱歌交替，避免连着唱好几首
+        public DanceDirector Dance;
+        public bool AutoDanceEnabled = true;
+
         float lastInteractionAt;
         float lastChatterAt;
         float lastAutoSongAt;
         bool autoSongClockStarted;   // 首唱只受冷场阈值限制，MinInterval 从第一首后才生效
+        bool lastAutoWasSong;        // 唱/跳交替用
         float nextIntervalJitter;
         int lastCategory = -1;
         readonly System.Random rng = new System.Random();
@@ -70,21 +75,47 @@ namespace DouyinLive
 
             float idleFor = now - lastInteractionAt;
 
-            // 深度冷场：自动唱一首（歌本身会带跳舞）；歌单为空则跳过。
-            // 首唱只看冷场时长；MinInterval 从唱过第一首之后才计。
-            if (AutoSongEnabled && Song != null && !Song.IsPlaying &&
-                SongList != null && SongList.Count > 0 &&
+            // 深度冷场：唱一首或跳一支，两者交替，避免连着唱好几首。
+            // 首次只看冷场时长；MinInterval 从第一次之后才计。
+            // 唱歌自带跳舞，不能在唱歌途中再起一支自动舞——这条挡在最外层而不是塞进
+            // songReady，因为 Song 为 null（未接歌曲服务）不该连带把跳舞路也堵死。
+            bool notSinging = Song == null || !Song.IsPlaying;
+            bool songReady = Song != null && SongList != null && SongList.Count > 0;
+            bool danceReady = AutoDanceEnabled && Dance != null && !Dance.Busy;
+            bool wantSong = AutoSongEnabled && songReady;
+
+            if (notSinging && (wantSong || danceReady) &&
                 idleFor >= AutoSongIdleThreshold &&
                 (!autoSongClockStarted || now - lastAutoSongAt >= AutoSongMinInterval) &&
                 !Speech.IsSpeaking && Speech.QueueCount == 0)
             {
-                autoSongClockStarted = true;
-                lastAutoSongAt = now;
-                lastChatterAt = now;   // 唱歌也算一次暖场，避免紧跟着说话
-                string pick = SongList[rng.Next(SongList.Count)];
-                Speech.Enqueue($"好像有点安静呢，那我来给大家唱一首 {pick} 吧~", SpeechPipeline.Priority.LikeThanks, 30f);
-                Song.RequestSong(pick, null);   // null = 自动唱歌，SongService 不再播报点歌提示
-                return;
+                // 上次唱过就这次跳；对应一侧不可用（开关关掉/歌单为空/舞跳到一半）时回退到另一侧
+                bool wantDance = lastAutoWasSong && danceReady;
+                if (!wantDance && !wantSong) wantDance = danceReady;
+
+                if (wantDance && Dance.PlayRandom())
+                {
+                    autoSongClockStarted = true;
+                    lastAutoSongAt = now;
+                    lastChatterAt = now;   // 表演也算一次暖场，避免紧跟着说话
+                    lastAutoWasSong = false;
+                    Speech.Enqueue("好像有点安静呢，那我来给大家跳一支舞吧~",
+                        SpeechPipeline.Priority.LikeThanks, 30f);
+                    return;
+                }
+
+                if (wantSong)
+                {
+                    autoSongClockStarted = true;
+                    lastAutoSongAt = now;
+                    lastChatterAt = now;
+                    lastAutoWasSong = true;
+                    string pick = SongList[rng.Next(SongList.Count)];
+                    Speech.Enqueue($"好像有点安静呢，那我来给大家唱一首 {pick} 吧~",
+                        SpeechPipeline.Priority.LikeThanks, 30f);
+                    Song.RequestSong(pick, null);   // null = 自动唱歌，不播报点歌提示
+                    return;
+                }
             }
 
             // 普通冷场：说暖场话
@@ -115,6 +146,7 @@ namespace DouyinLive
             lastChatterAt = Time.unscaledTime;
             lastAutoSongAt = Time.unscaledTime;
             autoSongClockStarted = false;
+            lastAutoWasSong = false;
             lastCategory = -1;
             RollJitter();
         }

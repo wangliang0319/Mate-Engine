@@ -69,6 +69,9 @@ namespace DouyinLive
         // 见该文件里的注释。
         public bool ChainPending => chainRemaining > 0;
 
+        // 正在跳（或连播还没跳完）。冷场自动跳舞用它避免在舞跳到一半时又起一支。
+        public bool Busy => (Dance != null && Dance.IsPlaying) || ChainPending;
+
         void Update()
         {
             var d = Dance;
