@@ -83,6 +83,49 @@ namespace DouyinLive.Tests
             Assert.AreEqual("swapAvatar:小白", copy.effects[0]);
         }
 
+        // WithEffect 是一份手抄的逐字段拷贝，将来给 TriggerRule 加第 19 个字段而
+        // 忘了同步那边，会静默失败——漏抄 perUserCooldown 就是悄悄放宽一道闸，
+        // 不会有任何报错。所以这里用反射逐字段比，加字段忘了抄就红给你看。
+        [Test]
+        public void 副本逐字段拷贝不漏字段()
+        {
+            var src = new TriggerRule
+            {
+                id = "swap",
+                enabled = false,                 // 默认 true，取反才能测出「抄了没」
+                source = "gift",
+                keywords = new List<string> { "换角色" },
+                regex = "^换.*$",
+                everyN = 30,
+                milestone = 3000L,
+                giftName = "小心心",
+                minDiamond = 10,
+                maxDiamond = 99,
+                minCount = 5,
+                effects = new List<string> { "swapAvatar:request", "mood:happy" },
+                pick = "random",
+                level = "L3",
+                cooldown = 60f,
+                perUserCooldown = 180f,
+                sayFallback = "兜底",
+                askPrompt = "换成谁呀"
+            };
+
+            var copy = RuleQuery.WithEffect(src, "swapAvatar:小白");
+
+            foreach (var f in typeof(TriggerRule).GetFields())
+            {
+                if (f.Name == "effects" || f.Name == "pick") continue;
+                Assert.AreEqual(f.GetValue(src), f.GetValue(copy),
+                    $"WithEffect 漏抄了字段 {f.Name}");
+            }
+
+            Assert.AreEqual(new List<string> { "swapAvatar:小白" }, copy.effects,
+                "effects 必须只剩传入的那一个效果");
+            Assert.AreEqual("all", copy.pick,
+                "副本只有一个效果，pick=random 会让它有几率不执行");
+        }
+
         [Test]
         public void 副本的pick强制为all()
         {

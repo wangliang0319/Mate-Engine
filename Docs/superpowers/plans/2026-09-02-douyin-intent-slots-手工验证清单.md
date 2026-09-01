@@ -1,7 +1,7 @@
 # 两轮点播手工验证清单
 
 前置：关掉 MateEngineX.exe → 确认 settings.json 里 `enableDouyinLive: true` →
-设置页填好云端 AI 的 `aiBaseUrl` / `aiApiKey` / `aiModel`。第 9~11 条只在云端后端
+设置页填好云端 AI 的 `aiBaseUrl` / `aiApiKey` / `aiModel`。第 11~13 条只在云端后端
 可用时才会触发，本地 LLM 不接意图兜底，漏填这三项会让这三条看起来「通过」但其实
 根本没跑到 LLM 判定那一步 →
 启动 `python Tools/douyin_mock_server.py` → 启动 MateEngineX.exe。
@@ -17,15 +17,19 @@
 - [ ] 6. 发「点舞」→ 角色问 → 发一个曲库里真实存在的舞名 → 播那支舞
 - [ ] 7. 发「换角色」→ 角色问 → 发一个模型库里存在的角色名 → **换成那个角色**
 - [ ] 8. 发「换角色」→ 角色问 → 发一个不存在的名字 → 说「衣柜里没有…」+ 随机换
-- [ ] 9. 发「我想听点音乐」→ 角色追问 → 发「赤伶」→ 开唱（LLM 兜底 + 槽位）
-- [ ] 10. 发「今天天气不错」→ 日志里**没有** `[IntentResolver]` 记录，正常闲聊
-- [ ] 11. `douyin_triggers.json` 里 `intentFallbackEnabled` 改 `false` 存盘（热重载生效）
-        → 第 9 条退化成纯闲聊，第 1 条仍然工作
-- [ ] 12. `slotWindowSeconds` 改 `0` 存盘 → 追问功能关闭，发「点歌」只问不等，
+- [ ] 9. 发「点舞」→ 角色问「想看哪支舞呀」→ 发一个曲库里**不存在**的舞名 →
+        说「曲库里还没有 X，先随便来一支吧~」并随机跳一支（不能不吭声）
+- [ ] 10. 发「点歌」→ 角色问 → 回「ask」→ 角色**不**重复追问，这条弹幕走 AI 闲聊，
+        槽位仍在（再发「赤伶」还能接上开唱）
+- [ ] 11. 发「我想听点音乐」→ 角色追问 → 发「赤伶」→ 开唱（LLM 兜底 + 槽位）
+- [ ] 12. 发「今天天气不错」→ 日志里**没有** `[IntentResolver]` 记录，正常闲聊
+- [ ] 13. `douyin_triggers.json` 里 `intentFallbackEnabled` 改 `false` 存盘（热重载生效）
+        → 第 11 条退化成纯闲聊，第 1 条仍然工作
+- [ ] 14. `slotWindowSeconds` 改 `0` 存盘 → 追问功能关闭，发「点歌」只问不等，
         再发歌名走闲聊（退回今天的行为）
-- [ ] 13. 把 `douyin_triggers.json` 里的 `song` 规则 `enabled` 改成 `false` 存盘
+- [ ] 15. 把 `douyin_triggers.json` 里的 `song` 规则 `enabled` 改成 `false` 存盘
         → 发「点歌」走闲聊，不报错、不哑掉
-- [ ] 14. **Old配置兼容**：用一份**升级前就存在的** `douyin_triggers.json`（没有
+- [ ] 16. **Old配置兼容**：用一份**升级前就存在的** `douyin_triggers.json`（没有
         `slotWindowSeconds` / `intentFallbackEnabled` / `askPrompt` 三个字段，`swap`
         规则的效果是裸 `swapAvatar`、`reqdance` 规则的效果是 `dance:random`，不是
         `:request`）启动，确认程序不报错。
@@ -35,6 +39,6 @@
           未变，不会因为新增字段缺失就变成先问再跳）
         - 发「换角色」→ **直接**随机换角色、**不追问**（老 `swapAvatar` 效果一字
           未变，不会因为新增字段缺失就变成先问再换）
-- [ ] 15. **已知限制**：`swapAvatar:<角色名>` 只能匹配到 `avatars.json` 里的模型；
+- [ ] 17. **已知限制**：`swapAvatar:<角色名>` 只能匹配到 `avatars.json` 里的模型；
         默认自带模型在角色库里的路径是空串，永远匹配不上，指名它会走「衣柜里没有」的
         兜底分支。这是已知限制，不是 bug。
