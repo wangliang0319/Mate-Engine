@@ -10,6 +10,9 @@ namespace DouyinLive
         public string Nickname;
         public string GiftName;
         public int GiftCount;
+        // 弹幕正文。dance:request / swapAvatar:request 是从正文里剥关键词拿到名字的，
+        // 排队几分钟后出队时原始事件早没了，不带上这个字段就会退化成「再问一遍」。
+        public string Content;
     }
 
     public enum ArbitrationResult

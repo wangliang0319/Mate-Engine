@@ -72,7 +72,8 @@ namespace DouyinLive
                 UserId = ev?.UserId,
                 Nickname = ev?.Nickname,
                 GiftName = ev?.GiftName,
-                GiftCount = ev?.GiftCount ?? 0
+                GiftCount = ev?.GiftCount ?? 0,
+                Content = ev?.Content
             };
 
             var result = Arbiter.Submit(req, g);
@@ -165,13 +166,15 @@ namespace DouyinLive
         }
 
         // 排队的请求出队时原始 DouyinEvent 已经不在了，用请求里存的字段重建
-        // 一个够 say: 占位符替换用的最小事件。
+        // 一个够 say: 占位符替换用的最小事件。Content 也必须还原：:request 类效果
+        // 靠它拿舞名/角色名，丢了就变成对着一个早就答过的请求再问一遍。
         static DouyinEvent Rebuild(ActionRequest req) => new DouyinEvent
         {
             UserId = req.UserId,
             Nickname = req.Nickname,
             GiftName = req.GiftName,
-            GiftCount = req.GiftCount
+            GiftCount = req.GiftCount,
+            Content = req.Content
         };
 
         public void ResetSession() => Arbiter.Reset();

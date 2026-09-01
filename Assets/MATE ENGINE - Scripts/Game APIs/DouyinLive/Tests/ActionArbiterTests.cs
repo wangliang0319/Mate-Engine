@@ -105,6 +105,21 @@ namespace DouyinLive.Tests
         }
 
         [Test]
+        public void 排队再出队不丢弹幕正文()
+        {
+            // dance:request / swapAvatar:request 靠 Content 拿舞名和角色名。
+            // 这个字段在排队期间丢掉的话，出队时会退化成「想看哪支舞呀」——
+            // 对着一个早就写清楚了答案的请求再问一遍。
+            arb.L3Busy = true;
+            var req = Req("reqdance", "L3");
+            req.Content = "点舞 极乐净土";
+            arb.Submit(req, g);
+
+            arb.L3Busy = false;
+            Assert.AreEqual("点舞 极乐净土", arb.TryDequeueL3(g).Content);
+        }
+
+        [Test]
         public void 唱歌未结束时不出队()
         {
             arb.L3Busy = true;
