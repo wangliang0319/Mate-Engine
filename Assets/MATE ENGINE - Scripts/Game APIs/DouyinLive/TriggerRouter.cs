@@ -263,9 +263,14 @@ namespace DouyinLive
                 return false;
             }
 
-            // 名字不可用就只问不做：ask 分支会开槽等观众补答
-            string effect = RuleQuery.BuildEffect(
-                kind, IntentText.IsUsableArg(arg) ? arg.Trim() : "ask");
+            // 名字不可用就只问不做：ask 分支会开槽等观众补答。这个哨兵词不能由
+            // 模型说了算：模型真返回 arg:"ask" 时会被拼成 song:ask，那是换了个
+            // 子模式，不是歌名。
+            string a = (arg ?? "").Trim();
+            bool usable = IntentText.IsUsableArg(a)
+                          && !string.Equals(a, "ask", StringComparison.OrdinalIgnoreCase)
+                          && !string.Equals(a, "request", StringComparison.OrdinalIgnoreCase);
+            string effect = RuleQuery.BuildEffect(kind, usable ? a : "ask");
 
             bool executed = director.Submit(RuleQuery.WithEffect(rule, effect), ev, Config.global);
             if (executed) limiter.Commit(rule, Config.global, ev.UserId);

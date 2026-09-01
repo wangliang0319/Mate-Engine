@@ -1,6 +1,9 @@
 # 两轮点播手工验证清单
 
 前置：关掉 MateEngineX.exe → 确认 settings.json 里 `enableDouyinLive: true` →
+设置页填好云端 AI 的 `aiBaseUrl` / `aiApiKey` / `aiModel`。第 9~11 条只在云端后端
+可用时才会触发，本地 LLM 不接意图兜底，漏填这三项会让这三条看起来「通过」但其实
+根本没跑到 LLM 判定那一步 →
 启动 `python Tools/douyin_mock_server.py` → 启动 MateEngineX.exe。
 用 `c <昵称> <内容>` 发弹幕（模拟服务器的用法见脚本内提示）。
 
@@ -23,9 +26,15 @@
 - [ ] 13. 把 `douyin_triggers.json` 里的 `song` 规则 `enabled` 改成 `false` 存盘
         → 发「点歌」走闲聊，不报错、不哑掉
 - [ ] 14. **Old配置兼容**：用一份**升级前就存在的** `douyin_triggers.json`（没有
-        `slotWindowSeconds` / `intentFallbackEnabled` / `askPrompt` 三个字段）启动，
-        确认程序不报错、追问窗口按 30 秒默认值工作、老的 `dance:random` 和
-        `swapAvatar` 行为一字未变。
+        `slotWindowSeconds` / `intentFallbackEnabled` / `askPrompt` 三个字段，`swap`
+        规则的效果是裸 `swapAvatar`、`reqdance` 规则的效果是 `dance:random`，不是
+        `:request`）启动，确认程序不报错。
+        - 发「点歌」→ 角色追问 → **等 40 秒**再发「赤伶」→ 走闲聊不开唱（证明缺省
+          窗口按 30 秒默认值生效，不是 0 或无限）
+        - 发「跳舞」→ **直接**随机播一支舞、**不追问**（老 `dance:random` 效果一字
+          未变，不会因为新增字段缺失就变成先问再跳）
+        - 发「换角色」→ **直接**随机换角色、**不追问**（老 `swapAvatar` 效果一字
+          未变，不会因为新增字段缺失就变成先问再换）
 - [ ] 15. **已知限制**：`swapAvatar:<角色名>` 只能匹配到 `avatars.json` 里的模型；
         默认自带模型在角色库里的路径是空串，永远匹配不上，指名它会走「衣柜里没有」的
         兜底分支。这是已知限制，不是 bug。
