@@ -255,6 +255,11 @@ namespace DouyinLive
 
         bool TryPlayRandomCustom(AvatarDanceHandler d)
         {
+            // 洗牌轮播由 DanceDirector 统一管理，两条路径共用同一个袋子，
+            // 否则旧路径播过的舞在新路径的"一轮不重复"里不算数。
+            var director = UnityEngine.Object.FindFirstObjectByType<DanceDirector>();
+            if (director != null && director.PlayRandom()) return true;
+
             int count = d.EntryCount;
             if (count <= 0) return false;
             return d.PlayIndex(rng.Next(0, count));

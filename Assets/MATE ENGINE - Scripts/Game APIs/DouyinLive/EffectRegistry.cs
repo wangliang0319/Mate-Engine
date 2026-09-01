@@ -255,6 +255,8 @@ namespace DouyinLive
             }
         }
 
+        DanceDirector danceDirector;
+
         bool PlayDance(string arg)
         {
             var d = Dance;
@@ -262,8 +264,8 @@ namespace DouyinLive
 
             if (arg == "random")
             {
-                // 洗牌轮播在第三期由 DanceDirector 接管；这一期先用现有的随机
-                if (d.PlayIndex(UnityEngine.Random.Range(0, d.EntryCount))) return true;
+                if (danceDirector == null) danceDirector = FindFirstObjectByType<DanceDirector>();
+                if (danceDirector != null && danceDirector.PlayRandom()) return true;
                 return PlayBuiltinDance();
             }
 

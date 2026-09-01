@@ -34,6 +34,7 @@ namespace DouyinLive
         {
             director = GetComponent<ActionDirector>();
             if (director == null) director = gameObject.AddComponent<ActionDirector>();
+            if (GetComponent<DanceDirector>() == null) gameObject.AddComponent<DanceDirector>();
             limiter.Now = () => Time.unscaledTime;
             Config = TriggerConfigStore.LoadOrCreate();
             StartWatching();

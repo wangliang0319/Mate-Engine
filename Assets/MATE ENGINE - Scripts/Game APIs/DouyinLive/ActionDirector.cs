@@ -15,6 +15,7 @@ namespace DouyinLive
         EffectRegistry effects;
         SongService song;
         AvatarDanceHandler dance;
+        DanceDirector danceDirector;
 
         float l3StartedAt;
         bool l3EverBusy;                   // 本次 L3 期间是否观测到过「在唱 / 在跳」
@@ -41,6 +42,15 @@ namespace DouyinLive
             {
                 if (dance == null) dance = FindFirstObjectByType<AvatarDanceHandler>(FindObjectsInactive.Include);
                 return dance;
+            }
+        }
+
+        DanceDirector DanceDir
+        {
+            get
+            {
+                if (danceDirector == null) danceDirector = FindFirstObjectByType<DanceDirector>();
+                return danceDirector;
             }
         }
 
@@ -97,7 +107,13 @@ namespace DouyinLive
             // 两者都不成立时靠兜底时长兜住
             if (Arbiter.L3Busy)
             {
-                bool busy = (Song != null && Song.IsPlaying) || (Dance != null && Dance.IsPlaying);
+                // 连播链交接的两支舞之间，AvatarDanceHandler.IsPlaying 会有一帧变回
+                // false（上一支已停、下一支还没被 DanceDirector.Update 启动）——
+                // 一帧内多个 MonoBehaviour 的执行顺序不保证谁先跑，若只看 IsPlaying
+                // 就可能在这个空档误判「已经不忙了」，让排队的 L3 抢在连播链跳完
+                // 之前出队。ChainPending 补上这个盲区。
+                bool busy = (Song != null && Song.IsPlaying) || (Dance != null && Dance.IsPlaying) ||
+                    (DanceDir != null && DanceDir.ChainPending);
                 if (busy) l3EverBusy = true;
                 float elapsed = Time.unscaledTime - l3StartedAt;
 
