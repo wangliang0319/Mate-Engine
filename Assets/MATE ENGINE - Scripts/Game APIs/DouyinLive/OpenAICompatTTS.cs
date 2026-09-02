@@ -28,15 +28,28 @@ namespace DouyinLive
 
         public async Task<TTSResult> SynthesizeAsync(string text, CancellationToken ct)
         {
+            // CosyVoice 系列（硅基流动等）和 OpenAI 的请求形状不一样：
+            //   1) voice 要写成 "模型名:音色名"，只写音色名会被拒（Invalid voice, code 20047）；
+            //   2) 它没有 instructions 字段，风格指令无处可放——CosyVoice 官方文档说可以用
+            //      <|endofprompt|> 把指令拼进正文，但硅基流动的部署实测不认这个标记：
+            //      同一句 13 字的话，纯正文 1.66 秒，拼了指令变 9.7~24 秒，指令被当成正文念了出来。
+            //      所以这里直接丢弃 Instructions，音色只能靠 ttsVoice 选。
+            bool cosyVoice = Model != null &&
+                             Model.IndexOf("CosyVoice", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            string voice = Voice;
+            if (cosyVoice && !string.IsNullOrWhiteSpace(voice) && voice.IndexOf(':') < 0)
+                voice = Model + ":" + voice;
+
             var payload = new System.Collections.Generic.Dictionary<string, object>
             {
                 ["model"] = Model,
                 ["input"] = text,
-                ["voice"] = Voice,
+                ["voice"] = voice,
                 ["speed"] = Speed,
                 ["response_format"] = "mp3"
             };
-            if (!string.IsNullOrWhiteSpace(Instructions)) payload["instructions"] = Instructions;
+            if (!cosyVoice && !string.IsNullOrWhiteSpace(Instructions)) payload["instructions"] = Instructions;
             var body = JsonConvert.SerializeObject(payload);
 
             using var req = new HttpRequestMessage(HttpMethod.Post, BaseUrl.Trim().TrimEnd('/') + "/audio/speech");

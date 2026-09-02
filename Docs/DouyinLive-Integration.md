@@ -131,6 +131,24 @@ auto       自动模式(含随机点歌/点舞/大礼物)     q 退出
 - **点歌优先级**：本地 MMD 同名舞包（真编舞）> 网易云在线（VIP 歌自动落到可播的翻唱版）。
 - **三级降级**：云 LLM→本地 LLMUnity→不回复；云 TTS→(EdgeTTS 已失效)→纯气泡字幕。
 
+### 触发层（2026-08 新增）
+
+```
+DouyinLiveClient → DouyinLiveManager.Route()
+                        ├─ TriggerRouter.TryHandle(ev)      读 douyin_triggers.json，热重载
+                        │     └─ TriggerMatcher.Match       纯函数，命中的第一条规则
+                        │     └─ TriggerLimiter.Check       四道限流闸
+                        │     └─ ActionDirector.Submit      三层仲裁 + L3 队列
+                        │           └─ EffectRegistry.Execute
+                        └─ 未命中 → 原有的 reward / danmakuAI / welcome / like 逻辑
+```
+
+旁路式：删掉 `douyin_triggers.json` 就完全回退到接入触发层之前的行为。
+
+纯逻辑部分在 `Core/` 子目录里，属于 `MateEngine.DouyinLive.Core` 程序集，
+对应的 EditMode 测试在 `Tests/`（Unity 的 asmdef 不能反向引用 `Assembly-CSharp`，
+所以想单元测试的代码必须放进独立程序集）。
+
 ## 已知边界
 
 - PackMsgType 编号按 DouyinBarrageGrab 常见版本假定（1弹幕/2点赞/3进房/4关注/5礼物/6统计/7粉丝团/8分享），

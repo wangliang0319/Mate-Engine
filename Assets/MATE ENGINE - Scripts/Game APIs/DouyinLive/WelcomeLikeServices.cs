@@ -52,6 +52,12 @@ namespace DouyinLive
             switch (ev.Type)
             {
                 case DouyinMsgType.Enter:
+                    // 注意：如果 douyin_triggers.json 配了 source=enter 的规则，触发层可能
+                    // 在这段代码跑到之前就把事件消费掉，本方法整个不会被调用，
+                    // RecordVisit 也就不会执行，会永久破坏「大哥回归/老朋友」识别。
+                    // 默认规则集里没有 enter 规则，且下面这段读历史→记录→按历史分支播报
+                    // 的顺序是互相依赖的，硬拆成「记账」+「播报」两半风险大于收益，
+                    // 这里只留个提醒，不做代码拆分（对照 like 的 RecordOnly 写法）。
                     if (!welcomedThisSession.Add(ev.UserId)) return;
                     // 先读历史（本次来访之前的状态），再记录本次来访
                     var v = Audience != null ? Audience.Get(ev.UserId) : null;
@@ -141,11 +147,19 @@ namespace DouyinLive
             "谢谢 {user} 的小红心，比心~"
         };
 
-        public void OnEvent(DouyinEvent ev)
+        // 会话统计的记账，与是否要播报语音无关。触发层可能命中一条 like 规则把
+        // 事件在 switch 之前就消费掉，OnEvent 因此不会被调用——但 SessionTotal
+        // 要驱动设置面板显示，任何一次点赞都不能漏计，所以 Route() 在触发层
+        // 判定之前无条件调用本方法（见 DouyinLiveManager.Route）。
+        public void RecordOnly(DouyinEvent ev)
         {
             if (ev.Type != DouyinMsgType.Like) return;
             sessionTotal += ev.LikeCount;
             if (!string.IsNullOrEmpty(ev.Nickname)) lastLikerName = ev.Nickname;
+        }
+
+        public void OnEvent(DouyinEvent ev)
+        {
             if (!Enabled || Speech == null) return;
 
             // 里程碑欢呼（无冷却，优先）

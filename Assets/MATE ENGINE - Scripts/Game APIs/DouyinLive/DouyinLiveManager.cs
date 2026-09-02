@@ -36,6 +36,9 @@ namespace DouyinLive
         readonly RoomContext room = new RoomContext();
         readonly LiveOpsService liveOps = new LiveOpsService();
         bool audienceLoaded;
+        TriggerRouter triggers;
+        EffectRegistry triggerEffects;
+        readonly IntentResolver intents = new IntentResolver();
 
         CloudChatBackend cloudBackend;
         LocalChatBackend localBackend;
@@ -114,6 +117,7 @@ namespace DouyinLive
                 if (songService == null) songService = gameObject.AddComponent<SongService>();
             }
             songService.Speech = speech;
+            songService.targetLoudness = Mathf.Clamp(d.douyinSongLoudness, 0.01f, 0.3f);
             reward.Song = songService;
 
             danmakuAI.Speech = speech;
@@ -139,13 +143,40 @@ namespace DouyinLive
             idleChatter.IdleThreshold = d.douyinIdleThreshold;
             idleChatter.AutoSongEnabled = d.douyinIdleAutoSongEnabled;
             idleChatter.AutoSongIdleThreshold = d.douyinIdleAutoSongThreshold;
+            idleChatter.AutoSongMinInterval = d.douyinIdleAutoSongMinInterval;
             idleChatter.SongList = d.douyinIdleSongList ?? new List<string>();
+            idleChatter.AutoDanceEnabled = d.douyinIdleAutoDanceEnabled;
 
             // 直播期间大头模式保持窗口尺寸不变（窗口突变会导致直播伴侣采集画面裁切错乱）
             if (d.enableDouyinLive)
             {
                 var bigScreen = FindFirstObjectByType<AvatarBigScreenHandler>();
                 if (bigScreen != null) bigScreen.keepWindowSize = true;
+            }
+
+            // 可配置触发层：命中 douyin_triggers.json 的规则就由它接管，
+            // 未命中才走下面各 Service 的原有逻辑（旁路式，删配置文件即回退）
+            if (triggers == null)
+            {
+                triggerEffects = GetComponent<EffectRegistry>();
+                if (triggerEffects == null) triggerEffects = gameObject.AddComponent<EffectRegistry>();
+                triggers = GetComponent<TriggerRouter>();
+                if (triggers == null) triggers = gameObject.AddComponent<TriggerRouter>();
+            }
+            triggers.debugLog = debugLog;
+            intents.Cloud = cloudBackend;
+            intents.debugLog = debugLog;
+            if (triggerEffects != null) triggerEffects.debugLog = debugLog;
+
+            // DanceDirector 由上面的 TriggerRouter.Awake 挂载创建，只有到这里才能保证它已存在；
+            // 放在 idleChatter 那段里会在首次 ApplySettings 时取到 null，导致自动跳舞永远不触发
+            var danceDirector = GetComponent<DanceDirector>();
+            idleChatter.Dance = danceDirector;
+            if (danceDirector != null)
+            {
+                danceDirector.danceChainCount = Mathf.Max(1, d.douyinDanceChainCount);
+                danceDirector.danceParticleTheme = d.douyinDanceParticleTheme;
+                danceDirector.portraitSoftZoneRatio = Mathf.Clamp(d.douyinDancePortraitSoftZoneRatio, 0.05f, 0.4f);
             }
 
             // 竖屏直播窗口：完全由 douyinPortraitAspect 决定，>0 开启、<=0 保持普通窗口
@@ -185,6 +216,8 @@ namespace DouyinLive
             like.ResetSession();
             danmakuAI.ResetSession();
             idleChatter.ResetSession();
+            if (triggers != null) triggers.ResetSession();
+            intents.Reset();
             if (debugLog) Debug.Log("[DouyinLive] Started, connecting " + url);
         }
 
@@ -194,6 +227,11 @@ namespace DouyinLive
             client = null;
             running = false;
             speech.ClearQueue();
+            // 意图判定是 1.5 秒的异步调用，停播时可能还有一次在途；它的回调走
+            // MainThreadDispatcher，不受下面 Update 的 running 早退保护，所以这里
+            // 要把在等的请求和追问槽位一起清掉，别让角色在停播后自己动起来。
+            intents.Reset();
+            if (triggers != null) triggers.ResetSession();
         }
 
         void Update()
@@ -211,6 +249,7 @@ namespace DouyinLive
 
             if (!blocked)
             {
+                if (triggers != null) triggers.Tick();
                 welcome.Tick();
                 danmakuAI.Tick();
                 idleChatter.Tick();
@@ -223,13 +262,54 @@ namespace DouyinLive
         {
             if (debugLog) Debug.Log($"[DouyinLive] {ev.Type} {ev.Nickname}: {ev.Content}{ev.GiftName}");
             idleChatter.NotifyInteraction();   // 任何观众事件都重置冷场计时
+
+            // 观众记忆/房间上下文要在触发层之前记账：即使这条弹幕被规则消费掉，
+            // 它也应该计入观众画像，否则 AI 回复会丢失上下文。
+            if (ev.Type == DouyinMsgType.Chat)
+            {
+                audience.RecordMessage(ev.UserId, ev.Nickname, ev.Content);
+                room.AddChat(ev.Nickname, ev.Content);
+            }
+            else if (ev.Type == DouyinMsgType.Gift)
+            {
+                danmakuAI.MarkGifter(ev.UserId);
+                int value = Mathf.Max(1, ev.DiamondCount) * Mathf.Max(1, ev.GiftCount);
+                audience.RecordGift(ev.UserId, ev.Nickname, value);
+                room.LastGiftDesc = $"{ev.Nickname}送的{ev.GiftName}";
+                liveOps.RecordGift(ev.UserId, ev.Nickname, value);
+            }
+            else if (ev.Type == DouyinMsgType.Like)
+            {
+                like.RecordOnly(ev);   // 会话点赞总数不能因为被触发规则消费而漏计
+            }
+
+            if (triggers != null)
+            {
+                // 关键词规则排在槽位补全之前是有意的：观众答的歌名如果恰好叫
+                // 《抱抱》，会命中 love 规则去播飞吻而不是唱歌。宁可漏一次也不
+                // 要乱触发，这个顺序也顺带省掉了「答案是不是另一条命令」那道校验。
+                if (triggers.TryHandle(ev)) return;
+                // RewardService 的硬编码命令（点歌/换角色/菜单/玩法）和关键词规则
+                // 同级，同样要排在槽位补全之前。观众在追问期间发「点歌 晴天」是
+                // 一条新命令，不是答案——当答案处理会把「点歌 晴天」整串当歌名。
+                // 槽位刻意不动，这条弹幕交给 HandleChatLegacy 里的 RewardService。
+                if (!RewardService.IsDanmakuCommand(ev.Content) && triggers.TryFillSlot(ev)) return;
+            }
+
+            // 关键词和槽位都没接住：本地预筛命中的才去问大模型。异步，所以命中就
+            // 当场消费掉这条弹幕，判不出来再由回调补回 HandleChatLegacy ——
+            // 否则会出现「先闲聊回一句、一秒后又开始唱歌」的双重响应。
+            // 排除 RewardService 命令：「点歌 晴天」会命中 LooksLikeIntent(「歌」)，
+            // 不挡住的话每条命令都会先烧一次 LLM 调用，再抢 RewardService 的活。
+            if (ev.Type == DouyinMsgType.Chat && !RewardService.IsDanmakuCommand(ev.Content) &&
+                triggers != null && triggers.IntentFallbackEnabled &&
+                intents.TryResolve(ev, OnIntentResolved, OnIntentGaveUp))
+                return;
+
             switch (ev.Type)
             {
                 case DouyinMsgType.Chat:
-                    audience.RecordMessage(ev.UserId, ev.Nickname, ev.Content);
-                    room.AddChat(ev.Nickname, ev.Content);
-                    if (reward.TryHandleDanmaku(ev)) return;
-                    danmakuAI.OnDanmaku(ev);
+                    HandleChatLegacy(ev);
                     break;
                 case DouyinMsgType.Like:
                     like.OnEvent(ev);
@@ -244,23 +324,43 @@ namespace DouyinLive
                     TriggerBigHeadMoment();   // 关注 → 大头特写致谢
                     break;
                 case DouyinMsgType.Gift:
-                    danmakuAI.MarkGifter(ev.UserId);
-                    audience.RecordGift(ev.UserId, ev.Nickname,
-                        Mathf.Max(1, ev.DiamondCount) * Mathf.Max(1, ev.GiftCount));
-                    room.LastGiftDesc = $"{ev.Nickname}送的{ev.GiftName}";
-                    liveOps.RecordGift(ev.UserId, ev.Nickname,
-                        Mathf.Max(1, ev.DiamondCount) * Mathf.Max(1, ev.GiftCount));
                     reward.OnGift(ev);
                     TriggerBigHeadMoment();   // 礼物 → 大头特写致谢
                     break;
             }
         }
 
+        // 触发层、槽位、意图判定都没接住的弹幕走这里。抽成方法是因为意图判定
+        // 是异步的：1.5 秒后判不出来，回调要能把这条弹幕补回原路径。
+        void HandleChatLegacy(DouyinEvent ev)
+        {
+            if (reward.TryHandleDanmaku(ev)) return;
+            danmakuAI.OnDanmaku(ev);
+        }
+
+        void OnIntentResolved(DouyinEvent ev, IntentKind kind, string arg)
+        {
+            // 停播前发起的判定回来时直播已经结束了，这条回调也绕过了 IsBlocked()
+            if (!running) return;
+            if (triggers != null && triggers.TryHandleIntent(ev, kind, arg)) return;
+            // 规则不存在或被限流拦下：「我想听首歌」本身是很好的闲聊素材，
+            // 让 AI 回一句是体面的降级
+            HandleChatLegacy(ev);
+        }
+
+        // 模型判出 none 走的是另一条回调，同样是停播前发起、停播后才回来的，
+        // 直接把 HandleChatLegacy 交出去会在 StopLive 清完队列之后又塞一句话进去
+        void OnIntentGaveUp(DouyinEvent ev)
+        {
+            if (!running) return;
+            HandleChatLegacy(ev);
+        }
+
         // ---------- 大头特写：关注/礼物时镜头推到脸部说感谢，说完恢复 ----------
 
         bool bigHeadBusy;
 
-        void TriggerBigHeadMoment()
+        public void TriggerBigHeadMoment()
         {
             var d = SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data : null;
             if (d == null || !d.douyinBigHeadReaction) return;
@@ -291,6 +391,31 @@ namespace DouyinLive
 
             handler.SetBigScreen(false);
             bigHeadBusy = false;
+        }
+
+        // 供 EffectRegistry 的 swapAvatar 效果调用
+        public void SwapAvatarFromTrigger(string userName)
+        {
+            reward.SwitchRandomAvatar(userName);
+        }
+
+        // swapAvatar:<角色名> —— 名字为空或匹配不上时退回随机换
+        public void SwapAvatarFromTrigger(string userName, string wanted)
+        {
+            if (string.IsNullOrWhiteSpace(wanted)) reward.SwitchRandomAvatar(userName);
+            else reward.SwitchAvatarByName(userName, wanted);
+        }
+
+        // 供 EffectRegistry 的 sayAI: 效果使用
+        public void GenerateFromTrigger(string prompt, System.Action<string> onDone)
+        {
+            danmakuAI.GenerateOneShot(prompt, onDone);
+        }
+
+        // L2 动作会打断闲聊的暖场话（唱歌/跳舞不受影响）
+        public void InterruptIdleChatter()
+        {
+            idleChatter.NotifyInteraction();
         }
 
         bool IsBlocked()

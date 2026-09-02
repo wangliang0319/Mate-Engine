@@ -110,7 +110,7 @@ namespace DouyinLive
                 if (type == DouyinMsgType.None || type == DouyinMsgType.Stats) return;
 
                 var msg = JsonConvert.DeserializeObject<DouyinMsg>(env.Data);
-                var ev = DouyinEvent.From(type, msg);
+                var ev = DouyinEventFactory.From(type, msg);
                 if (ev == null) return;
 
                 if (ev.MsgId != 0)

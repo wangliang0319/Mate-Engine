@@ -222,7 +222,7 @@ namespace DouyinLive
                 var backend = Cloud != null && Cloud.IsAvailable ? Cloud : null;
                 if (backend != null)
                 {
-                    try { reply = await RunBackend(backend, systemPrompt, userMsg, OnDelta); }
+                    try { reply = await RunBackend(backend, systemPrompt, userMsg, OnDelta, history); }
                     catch (Exception ex)
                     {
                         Debug.LogWarning("[DanmakuAI] Cloud failed: " + ex.Message);
@@ -232,7 +232,7 @@ namespace DouyinLive
                 if (string.IsNullOrEmpty(reply) && !emittedAny &&
                     FallbackToLocal && Local != null && Local.IsAvailable)
                 {
-                    try { reply = await RunBackend(Local, systemPrompt, userMsg, OnDelta); }
+                    try { reply = await RunBackend(Local, systemPrompt, userMsg, OnDelta, history); }
                     catch (Exception ex)
                     {
                         Debug.LogWarning("[DanmakuAI] Local failed: " + ex.Message);
@@ -257,10 +257,63 @@ namespace DouyinLive
             finally { busy = false; }
         }
 
-        async Task<string> RunBackend(IChatBackend backend, string systemPrompt, string userMsg, Action<string> onDelta)
+        async Task<string> RunBackend(IChatBackend backend, string systemPrompt, string userMsg, Action<string> onDelta, List<ChatMsg> conversationHistory)
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(RequestTimeout));
-            return await backend.ChatAsync(systemPrompt, history, userMsg, onDelta, cts.Token);
+            return await backend.ChatAsync(systemPrompt, conversationHistory, userMsg, onDelta, cts.Token);
+        }
+
+        // 供触发层的 sayAI: 效果使用：给一段提示词、拿回一句可直接播报的文本。
+        // 不进队列、不受 MinInterval 限制、不写历史 —— 触发层有自己的四道限流闸，
+        // 再叠一层冷却只会让大礼物的感谢莫名其妙地不出声。
+        // onDone 保证在主线程回调；失败或被敏感词拦下时回传 null，由调用方决定兜底文案。
+        public void GenerateOneShot(string prompt, Action<string> onDone)
+        {
+            if (onDone == null) return;
+            // AI 回复总开关关着时不请求 LLM，直接让调用方走 sayFallback 兜底
+            if (!Enabled || string.IsNullOrWhiteSpace(prompt)) { onDone(null); return; }
+            _ = GenerateOneShotAsync(prompt, onDone);
+        }
+
+        async Task GenerateOneShotAsync(string prompt, Action<string> onDone)
+        {
+            string result = null;
+            try
+            {
+                string systemPrompt = SystemPrompt + " 只回一句话，不超过30个字。";
+                // 单独开一份空历史：GenerateOneShot 绕开 busy 标志与 ReplyAsync 并发执行，
+                // 共用 history 会被两边同时读写；礼物感谢也不该被无关弹幕带偏话题
+                var oneShotHistory = new List<ChatMsg>();
+
+                var backend = Cloud != null && Cloud.IsAvailable ? Cloud : null;
+                if (backend != null)
+                {
+                    try { result = await RunBackend(backend, systemPrompt, prompt, null, oneShotHistory); }
+                    catch (Exception ex) { Debug.LogWarning("[DanmakuAI] one-shot cloud failed: " + ex.Message); }
+                }
+                if (string.IsNullOrWhiteSpace(result) && FallbackToLocal && Local != null && Local.IsAvailable)
+                {
+                    try { result = await RunBackend(Local, systemPrompt, prompt, null, oneShotHistory); }
+                    catch (Exception ex) { Debug.LogWarning("[DanmakuAI] one-shot local failed: " + ex.Message); }
+                }
+
+                result = Sanitize(result);
+                // AI 生成的文案一律过敏感词表，直播合规不能因为走了旁路就放松
+                if (!string.IsNullOrEmpty(result) && !ContentFilter.IsSafe(result))
+                {
+                    Debug.LogWarning("[DanmakuAI] one-shot blocked by content filter");
+                    result = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[DanmakuAI] one-shot failed: " + ex.Message);
+                result = null;
+            }
+
+            // RunBackend 在后台线程完成，回调必须转回主线程才能碰 SpeechPipeline
+            string final = result;
+            MainThreadDispatcher.Post(() => onDone(final));
         }
 
         static string Sanitize(string s)
