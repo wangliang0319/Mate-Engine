@@ -21,6 +21,10 @@ public class SettingsHandlerDouyinLive : MonoBehaviour
     public Toggle likeToggle;
     public Toggle giftToggle;
 
+    [Header("弹幕模式")]
+    public TMP_Dropdown chatModeDropdown;   // 0=AI聊天 1=游戏陪播（也可直播中按 F9 切）
+    public Slider readIntervalSlider;       // 游戏陪播念弹幕间隔，1..15
+
     [Header("节流")]
     public Slider welcomeCooldownSlider;    // 3..30
     public Slider aiIntervalSlider;         // 3..30
@@ -84,6 +88,8 @@ public class SettingsHandlerDouyinLive : MonoBehaviour
         welcomeCooldownSlider?.onValueChanged.AddListener(v => { Data.douyinWelcomeCooldown = v; Apply(); });
         aiIntervalSlider?.onValueChanged.AddListener(v => { Data.douyinAIReplyMinInterval = v; Apply(); });
         likeThresholdSlider?.onValueChanged.AddListener(v => { Data.douyinLikeThreshold = (int)v; Apply(); });
+        chatModeDropdown?.onValueChanged.AddListener(i => { Data.douyinChatMode = i; Apply(); });
+        readIntervalSlider?.onValueChanged.AddListener(v => { Data.douyinReadInterval = v; Apply(); });
 
         aiBaseUrlInput?.onEndEdit.AddListener(v => { Data.aiBaseUrl = v.Trim(); Apply(); });
         aiApiKeyInput?.onEndEdit.AddListener(v => { Data.aiApiKey = v.Trim(); Apply(); });
@@ -130,6 +136,8 @@ public class SettingsHandlerDouyinLive : MonoBehaviour
         welcomeCooldownSlider?.SetValueWithoutNotify(d.douyinWelcomeCooldown);
         aiIntervalSlider?.SetValueWithoutNotify(d.douyinAIReplyMinInterval);
         likeThresholdSlider?.SetValueWithoutNotify(d.douyinLikeThreshold);
+        chatModeDropdown?.SetValueWithoutNotify(Mathf.Clamp(d.douyinChatMode, 0, 1));
+        readIntervalSlider?.SetValueWithoutNotify(d.douyinReadInterval);
 
         aiBaseUrlInput?.SetTextWithoutNotify(d.aiBaseUrl);
         aiApiKeyInput?.SetTextWithoutNotify(d.aiApiKey);

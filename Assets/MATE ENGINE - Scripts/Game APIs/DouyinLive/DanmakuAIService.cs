@@ -24,6 +24,10 @@ namespace DouyinLive
         public PersonaCard Persona;          // 人设卡（douyin_persona.json）
         public AudienceMemory Audience;      // 观众记忆
         public RoomContext Room;             // 直播间语境
+        // AI 聊天模式（游戏陪播模式下本服务根本不会被喂弹幕）：回复要详细、
+        // 结尾抛问题引导观众继续聊，而不是原来的「一句话最多30字」。
+        // 直播中可变（F9 切模式），SystemPrompt 每次请求都现读，这里做成活属性。
+        public bool VerboseChat = true;
 
         public int RepliedCount { get; private set; }
 
@@ -43,8 +47,11 @@ namespace DouyinLive
 
         string SystemPrompt =>
             (Persona != null ? Persona.ToPromptSection() : "你是一个桌面宠物虚拟主播。") +
-            "你正在抖音直播，观众会发弹幕，你要活泼简短地回应。" +
-            "规则：回复必须精简，一般一句话，最多不超过30个字；不要使用表情符号、颜文字、markdown或任何特殊符号；" +
+            "你正在抖音直播，观众会发弹幕，你要活泼地回应。" +
+            (VerboseChat
+                ? "规则：回复要充实，通常两到三句话；结尾自然地向观众抛一个问题，引导对方继续聊；"
+                : "规则：回复必须精简，一般一句话，最多不超过30个字；") +
+            "不要使用表情符号、颜文字、markdown或任何特殊符号；" +
             "适合直接朗读出来；直接说内容，不要加引号或前缀；不聊政治宗教等敏感话题。" +
             (string.IsNullOrEmpty(ExtraPersona) ? "" : ("补充设定：" + ExtraPersona));
 
@@ -245,7 +252,8 @@ namespace DouyinLive
                     stream?.Complete();
                 }
 
-                string fullReply = Sanitize(!string.IsNullOrEmpty(reply) ? reply : full.ToString());
+                string fullReply = Sanitize(!string.IsNullOrEmpty(reply) ? reply : full.ToString(),
+                    MaxFullReplyChars);
                 if (string.IsNullOrEmpty(fullReply) || !emittedAny) return;
 
                 history.Add(new ChatMsg("user", userMsg));
@@ -316,13 +324,19 @@ namespace DouyinLive
             MainThreadDispatcher.Post(() => onDone(final));
         }
 
-        static string Sanitize(string s)
+        // 单句上限 60 字：句级流式里每句单独过这道闸，太长听众等不起。
+        // 整段回复的历史留存上限放宽到 200——AI 聊天模式两三句话 60 字根本装不下，
+        // 会把引导观众的那个问题截掉，而那个问题正是这个模式的价值所在。
+        const int MaxSentenceChars = 60;
+        const int MaxFullReplyChars = 200;
+
+        static string Sanitize(string s, int maxChars = MaxSentenceChars)
         {
             if (string.IsNullOrEmpty(s)) return s;
             s = s.Trim().Trim('"', '“', '”', '\'');
             // 移除 emoji 与 markdown 痕迹，保证适合朗读
             s = Regex.Replace(s, @"[\p{So}\p{Sk}*#`_~\[\]]", "");
-            if (s.Length > 60) s = s.Substring(0, 60);
+            if (s.Length > maxChars) s = s.Substring(0, maxChars);
             return s.Trim();
         }
 

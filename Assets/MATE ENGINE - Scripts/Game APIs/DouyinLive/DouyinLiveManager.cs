@@ -23,6 +23,11 @@ namespace DouyinLive
         [Header("Gating")]
         public List<GameObject> blockObjects = new List<GameObject>();
 
+        [Header("Chat Mode")]
+        // 直播中途切换 AI聊天/游戏陪播。默认 F9：与现有 B/F1/F8 无冲突，
+        // 也不在 Unity 的 Input 模拟按键之列
+        public KeyCode chatModeKey = KeyCode.F9;
+
         SpeechPipeline speech;
         DouyinLiveClient client;
         SongService songService;
@@ -31,6 +36,7 @@ namespace DouyinLive
         readonly LikeService like = new LikeService();
         readonly RewardService reward = new RewardService();
         readonly DanmakuAIService danmakuAI = new DanmakuAIService();
+        readonly DanmakuReader reader = new DanmakuReader();
         readonly IdleChatterService idleChatter = new IdleChatterService();
         readonly AudienceMemory audience = new AudienceMemory();
         readonly RoomContext room = new RoomContext();
@@ -51,6 +57,8 @@ namespace DouyinLive
             client != null ? client.ConnectionState : DouyinLiveClient.State.Stopped;
         public long SessionLikes => like.SessionTotal;
         public int SessionReplies => danmakuAI.RepliedCount;
+        // 0=AI聊天 1=游戏陪播。直播中可变（F9/设置页），读方要现读现用
+        public int ChatMode { get; private set; }
 
         void Awake()
         {
@@ -124,6 +132,11 @@ namespace DouyinLive
             danmakuAI.Enabled = d.douyinAIReplyEnabled;
             danmakuAI.MinInterval = d.douyinAIReplyMinInterval;
             danmakuAI.ExtraPersona = d.douyinLivePrompt;
+            danmakuAI.VerboseChat = d.douyinChatMode == 0;   // AI 聊天模式回复要详细并引导话题
+            ChatMode = d.douyinChatMode;
+
+            reader.Speech = speech;
+            reader.Interval = Mathf.Max(1f, d.douyinReadInterval);
             danmakuAI.Cloud = cloudBackend;
             danmakuAI.Local = localBackend;
             danmakuAI.FallbackToLocal = d.aiFallbackToLocal;
@@ -215,6 +228,7 @@ namespace DouyinLive
             liveOps.ResetSession();
             like.ResetSession();
             danmakuAI.ResetSession();
+            reader.ResetSession();
             idleChatter.ResetSession();
             if (triggers != null) triggers.ResetSession();
             intents.Reset();
@@ -237,6 +251,7 @@ namespace DouyinLive
         void Update()
         {
             MainThreadDispatcher.Drain();
+            UpdateChatMode();
             if (!running || client == null) return;
 
             bool blocked = IsBlocked();
@@ -252,10 +267,29 @@ namespace DouyinLive
                 if (triggers != null) triggers.Tick();
                 welcome.Tick();
                 danmakuAI.Tick();
+                reader.Tick();
                 idleChatter.Tick();
                 liveOps.Tick();
             }
             audience.SaveIfDirty();
+        }
+
+        // 直播中途切换弹幕处理模式。游戏陪播的主播人在游戏里，
+        // 切换成功与否只能靠听——所以必须念一句确认，不能只写日志。
+        void UpdateChatMode()
+        {
+            if (chatModeKey == KeyCode.None || !Input.GetKeyDown(chatModeKey)) return;
+            var d = SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data : null;
+            if (d == null) return;
+
+            d.douyinChatMode = ChatMode == 0 ? 1 : 0;
+            SaveLoadHandler.Instance.SaveToDisk();
+            ApplySettings();
+            speech.Enqueue(
+                ChatMode == 1 ? "切到游戏陪播模式啦，弹幕我来念，你安心打游戏~"
+                              : "切回AI聊天模式，我来接弹幕～",
+                SpeechPipeline.Priority.Milestone, 15f);
+            if (debugLog) Debug.Log($"[DouyinLive] ChatMode -> {ChatMode}");
         }
 
         void Route(DouyinEvent ev)
@@ -335,7 +369,10 @@ namespace DouyinLive
         void HandleChatLegacy(DouyinEvent ev)
         {
             if (reward.TryHandleDanmaku(ev)) return;
-            danmakuAI.OnDanmaku(ev);
+            // 游戏陪播：AI 不掺和，带昵称念出来，主播听声人工回复。
+            // 指令弹幕（触发规则/槽位/点歌等）在进到这里之前就已被消费。
+            if (ChatMode == 1) reader.OnDanmaku(ev);
+            else danmakuAI.OnDanmaku(ev);
         }
 
         void OnIntentResolved(DouyinEvent ev, IntentKind kind, string arg)

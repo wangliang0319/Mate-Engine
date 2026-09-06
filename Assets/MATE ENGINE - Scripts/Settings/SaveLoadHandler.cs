@@ -198,6 +198,10 @@ public class SaveLoadHandler : MonoBehaviour
         public float douyinAIReplyMinInterval = 8f;
         public int douyinLikeThreshold = 100;
         public string douyinLivePrompt = "";
+        // 弹幕处理模式：0=AI聊天（AI 详细回复并引导观众继续聊）1=游戏陪播（带昵称念弹幕，主播人工回复）
+        public int douyinChatMode = 0;
+        // 游戏陪播模式下念两条弹幕的最小间隔（秒），弹幕洪峰时旧念读还会被同优先级新念读挤掉
+        public float douyinReadInterval = 5f;
         public bool douyinIdleChatterEnabled = true;
         public float douyinIdleThreshold = 90f;
         public bool douyinBigHeadReaction = true;   // 关注/礼物时大头特写致谢
