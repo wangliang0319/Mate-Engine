@@ -237,8 +237,14 @@ public class SaveLoadHandler : MonoBehaviour
         public string douyinVoiceAsrModel = "FunAudioLLM/SenseVoiceSmall";
         public float douyinVoiceCommandWindow = 8f;         // 唤醒后最长录音秒数（装配时钳 2~15）
         public float douyinVoiceSilenceSeconds = 1.2f;      // 静音多久算说完（装配时钳 0.5~3）
-        public bool douyinVoicePauseWhilePerforming = true; // 角色出声时暂停监听，防自触发
-        public bool douyinVoiceKeywordWake = true;          // false=强制音量检测模式（与本地识别器抢设备时的逃生门）
+        public bool douyinVoicePauseWhilePerforming = true; // 已废弃（语音 v2 改为打断/压低音乐/暂停播报），保留字段兼容老配置，不再读取
+        public bool douyinVoiceKeywordWake = true;          // true=sherpa 离线唤醒（推荐）；false=音量检测模式（必须一口气说完）
+        // sherpa 离线唤醒词：带声调拼音、声母韵母分开写，@ 后是显示名。写错的音节启动日志会指出
+        public List<string> douyinVoiceWakeKeywords = new() { DouyinLive.WakeKeywordSpec.DefaultKeyword };
+        public List<string> douyinVoiceAckLines = new() { "我在～", "嗯？", "你说～", "在呢" };   // 唤醒应答，开播时预合成
+        public float douyinVoiceAckTimeout = 5f;            // 应答后多久没开口就放弃（装配时钳 2~15）
+        public float douyinVoiceFollowUpSeconds = 6f;       // 她回答后可直接追问的窗口，0=关闭（装配时钳 0~20）
+        public float douyinVoiceDuckVolume = 0.3f;          // 唤醒时歌声压低到的比例
         public string douyinVoiceNickname = "主播";          // 语音事件在观众记忆/上下文里的名字
         public bool douyinVoiceRelayEnabled = true;          // 传话总开关：false=语音一律走聊天
         // 传话开头词：「小美小美 告诉大家八点下播」→ 原样播出「八点下播」。只认句首，同时命中取最长

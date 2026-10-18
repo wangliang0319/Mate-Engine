@@ -1,81 +1,100 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR
-using UnityEngine.Windows.Speech;
-#endif
 
 namespace DouyinLive
 {
-    // 语音助手入口：麦克风常开 → 唤醒（本地关键词，系统不支持就降级音量检测）→
-    // 录一句话（静音判定）→ 云端 ASR → 剥唤醒词 → InjectVoiceChat 伪装弹幕。
-    // 只做采集和转写，不做任何意图判断；角色出声时暂停监听（防自触发）。
-    //
-    // 启停统一走 MonoBehaviour.enabled：ApplySettings 里 Configure + enabled 赋值。
+    public class VoiceListenerSettings
+    {
+        public List<string> WakeWords = new List<string>();       // 中文唤醒词：从 ASR 文本里剥掉；音量检测模式靠它判定唤醒
+        public List<string> WakeKeywords = new List<string>();    // sherpa 拼音唤醒词
+        public List<string> AckLines = new List<string>();
+        public float CommandWindow = 8f;
+        public float SilenceSeconds = 1.2f;
+        public float AckTimeout = 5f;
+        public float FollowUpSeconds = 6f;
+        public float DuckVolume = 0.3f;
+        public bool KeywordWake = true;
+        public bool DebugLog;
+    }
+
+    // 语音助手入口（v2）：麦克风常开 → sherpa 离线唤醒 → 会话状态机（应答/聆听/追问/打断/压低音乐）
+    // → 云端 ASR → 剥唤醒词 → InjectVoiceChat。时序规则全在 VoiceSessionMachine，这里只负责
+    // 读麦克风、喂引擎、执行状态机给出的动作。
+    // sherpa 不可用（DLL/模型缺失、唤醒词全写错、配置关闭）时退回旧的音量检测流程：
+    // 一口气说完、无应答、角色出声期间暂停监听。
     public class VoiceCommandListener : MonoBehaviour
     {
-        public bool debugLog = false;
+        const int SampleRate = 16000;
+        const float PreWakeSeconds = 3f;      // 音量检测模式的回看（起音判定本身有 0.3 秒延迟）
+        const float WakePreRoll = 0.6f;       // sherpa 模式唤醒/追问起音时的回看，盖住起音前的 0.3 秒
+        const float VoicedRms = 0.02f;        // 会话状态机的「有声」门槛
+        const float SilenceRms = 0.015f;      // 音量检测模式的静音判定（沿用 v1）
+        const float VadStartSeconds = 0.3f;   // 音量检测模式：连续这么久超阈值才算起音
+        const float VadStartRms = 0.03f;
 
-        public List<string> WakeWords = new List<string> { "小美小美", "小美" };
-        public float CommandWindow = 8f;      // 唤醒后最长录音秒数
-        public float SilenceSeconds = 1.2f;   // 静音多久算说完
-        public bool PauseWhilePerforming = true;
-        public bool KeywordWake = true;       // false=强制音量检测模式（与本地识别器抢设备时的逃生门）
+        public bool debugLog;
 
-        SpeechPipeline speech;      // 角色正在说话？
-        SongService song;           // 角色正在唱歌？
-        DouyinLiveManager manager;  // 命令上交
+        VoiceListenerSettings cfg = new VoiceListenerSettings();
+        SpeechPipeline speech;
+        SongService song;
+        DouyinLiveManager manager;
         CloudASRProvider asr;
+        readonly VoiceAckLines ackLines = new VoiceAckLines();
 
-        string collectionKey;   // 影响采集的参数指纹，变了才重启麦克风/识别器
-        CustomDancePlayer.AvatarDanceHandler mmdDance;   // MMD 舞包/礼物舞的原曲不经 SongService，要单独盯
-        float mmdNextFind;
-
+        string collectionKey;   // 影响采集的参数指纹，变了才重启麦克风/唤醒引擎
         VoiceCaptureBuffer buffer;
         AudioClip micClip;
         string micDevice;
-        int lastReadPos;            // 上次读到 micClip 的位置（环绕剪裁）
-        float vadRms;               // 最近一次读入的 RMS（VAD 起音用）
-        float vadLoudSince = -1f;   // 连续超阈值起点
-        bool keywordMode;           // false = VAD 降级
-        bool recognizing;           // 关键词识别器当前是否在跑
+        int lastReadPos;
+        float frameRms;
+        float vadLoudSince = -1f;
         bool asrInFlight;
+        bool blockedLastFrame;
         CancellationTokenSource cancel;
 
-        const float VadStartSeconds = 0.3f;  // 连续这么久超阈值才算起音
-        const float VadStartRms = 0.03f;     // 起音阈值比静音判定高一点，防底噪
+        SherpaWakeDetector wake;
+        VoiceSessionMachine machine;   // 非空 = sherpa 模式
 
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR
-        KeywordRecognizer recognizer;
-#endif
+        CustomDancePlayer.AvatarDanceHandler mmdDance;   // MMD 舞包的原曲不经 SongService，要单独盯
+        float mmdNextFind;
+        float mmdVolumeBeforeDuck = -1f;
 
         public void Configure(SpeechPipeline speechPipeline, SongService songService,
                               DouyinLiveManager managerRef, CloudASRProvider asrProvider,
-                              List<string> wakeWords, float commandWindow, float silenceSeconds,
-                              bool pauseWhilePerforming, bool keywordWake, bool debug)
+                              VoiceListenerSettings settings)
         {
             speech = speechPipeline;
             song = songService;
             manager = managerRef;
             asr = asrProvider;
-            WakeWords = wakeWords != null ? new List<string>(wakeWords) : new List<string>();
-            CommandWindow = Mathf.Clamp(commandWindow, 2f, 15f);
-            SilenceSeconds = Mathf.Clamp(silenceSeconds, 0.5f, 3f);
-            PauseWhilePerforming = pauseWhilePerforming;
-            KeywordWake = keywordWake;
-            debugLog = debug;
-            // ApplySettings 高频调用（F9/设置页/测试按钮）：只有影响采集的参数变了
-            // 才重启麦克风和识别器，纯引用赋值不动设备（重启有 100~300ms 拾音空洞）
-            var key = string.Join("|", WakeWords) + "|" + CommandWindow + "|" + SilenceSeconds + "|" + KeywordWake;
+            cfg = settings ?? new VoiceListenerSettings();
+            cfg.WakeWords = cfg.WakeWords ?? new List<string>();
+            cfg.WakeKeywords = cfg.WakeKeywords ?? new List<string>();
+            cfg.CommandWindow = Mathf.Clamp(cfg.CommandWindow, 2f, 15f);
+            cfg.SilenceSeconds = Mathf.Clamp(cfg.SilenceSeconds, 0.5f, 3f);
+            cfg.AckTimeout = Mathf.Clamp(cfg.AckTimeout, 2f, 15f);
+            cfg.FollowUpSeconds = Mathf.Clamp(cfg.FollowUpSeconds, 0f, 20f);
+            cfg.DuckVolume = Mathf.Clamp01(cfg.DuckVolume);
+            debugLog = cfg.DebugLog;
+            ackLines.debugLog = debugLog;
+            ackLines.Prepare(speech != null ? speech.Provider : null, cfg.AckLines);
+
+            // ApplySettings 高频调用：只有影响采集的参数变了才重启（重启有拾音空洞，还要重新加载模型）
+            var key = string.Join("|", cfg.WakeWords) + "|" + string.Join("|", cfg.WakeKeywords) + "|" +
+                      cfg.CommandWindow + "|" + cfg.SilenceSeconds + "|" + cfg.KeywordWake + "|" +
+                      cfg.AckTimeout + "|" + cfg.FollowUpSeconds;
             if (isActiveAndEnabled && key != collectionKey) { StopMic(); StartMic(); }
             collectionKey = key;
         }
 
-        // StartLive/StopLive 调用：丢弃在途转写与缓冲，别让上一场的话进这一场
+        // StartLive/StopLive 调用：丢弃进行中的会话与在途转写，恢复被压低的音乐和暂停的播报
         public void ResetSession()
         {
+            if (machine != null) Execute(machine.Abort());
             cancel?.Cancel();
             cancel = new CancellationTokenSource();
             buffer?.Clear();
@@ -88,12 +107,6 @@ namespace DouyinLive
 
         void StartMic()
         {
-            if (WakeWords.Count == 0)
-            {
-                Debug.LogWarning("[Voice] 唤醒词列表为空，语音助手不启动");
-                enabled = false;
-                return;
-            }
             if (Microphone.devices.Length == 0)
             {
                 Debug.LogWarning("[Voice] 没有可用麦克风（检查 Windows 麦克风权限），语音助手不启动");
@@ -101,30 +114,76 @@ namespace DouyinLive
                 return;
             }
             micDevice = Microphone.devices[0];
-            // clip 长度必须盖住环形缓冲（PreWake + 窗口 + 余量），环绕读取才安全
-            int clipSec = Mathf.CeilToInt(3f + CommandWindow + 1f);
-            micClip = Microphone.Start(micDevice, true, clipSec, 16000);
+            // clip 长度必须盖住环形缓冲（回看 + 窗口 + 余量），环绕读取才安全
+            int clipSec = Mathf.CeilToInt(PreWakeSeconds + cfg.CommandWindow + 1f);
+            micClip = Microphone.Start(micDevice, true, clipSec, SampleRate);
             if (micClip == null)
             {
                 Debug.LogWarning("[Voice] 麦克风打开失败，语音助手不启动");
                 enabled = false;
                 return;
             }
-            int micRate = micClip.frequency;
-            buffer = new VoiceCaptureBuffer(micRate, 3f, CommandWindow, SilenceSeconds, 0.015f);
+            buffer = new VoiceCaptureBuffer(micClip.frequency, PreWakeSeconds, cfg.CommandWindow, cfg.SilenceSeconds, SilenceRms);
             lastReadPos = Microphone.GetPosition(micDevice);
             cancel?.Cancel();
             cancel = new CancellationTokenSource();
             asrInFlight = false;
             vadLoudSince = -1f;
-            TryStartKeyword();
-            if (debugLog)
-                Debug.Log($"[Voice] 已启动 {micDevice} @{micRate}Hz 模式={(keywordMode ? "关键词" : "音量检测")}");
+            blockedLastFrame = false;
+
+            TryStartSherpa();
+            if (machine == null && cfg.WakeWords.Count == 0)
+            {
+                Debug.LogWarning("[Voice] 音量检测模式需要中文唤醒词（douyinVoiceWakeWords 为空），语音助手不启动");
+                StopMic();
+                enabled = false;
+                return;
+            }
+            Debug.Log($"[Voice] 已启动 {micDevice} @{micClip.frequency}Hz 模式={(machine != null ? "离线唤醒(sherpa)" : "音量检测")}");
+        }
+
+        void TryStartSherpa()
+        {
+            machine = null;
+            if (!cfg.KeywordWake)
+            {
+                Debug.Log("[Voice] 已配置为音量检测模式（douyinVoiceKeywordWake=false）");
+                return;
+            }
+            try
+            {
+                wake = SherpaWakeDetector.Create(
+                    Path.Combine(Application.streamingAssetsPath, "SherpaOnnx", "kws"),
+                    cfg.WakeKeywords, Application.temporaryCachePath);
+            }
+            catch (Exception ex)
+            {
+                // 托管 sherpa-onnx.dll 缺失时异常在这里抛（Create 内部只兜得住原生库缺失）
+                wake = null;
+                Debug.LogWarning("[Voice] sherpa 离线唤醒加载失败，退回音量检测模式：" + ex.Message);
+                return;
+            }
+            foreach (var e in wake.KeywordErrors) Debug.LogWarning("[Voice] 唤醒词配置有误，已跳过：" + e);
+            if (!wake.IsAvailable)
+            {
+                Debug.LogWarning("[Voice] sherpa 离线唤醒不可用，退回音量检测模式：" + wake.Error);
+                wake.Dispose();
+                wake = null;
+                return;
+            }
+            var t = VoiceSessionTiming.Default;
+            t.AckTimeout = cfg.AckTimeout;
+            t.EndSilence = cfg.SilenceSeconds;
+            t.MaxUtterance = cfg.CommandWindow;
+            t.FollowUpWindow = cfg.FollowUpSeconds;
+            machine = new VoiceSessionMachine(t);
         }
 
         void StopMic()
         {
-            TryStopKeyword();
+            if (machine != null) Execute(machine.Abort());   // 先恢复音乐和播报，再拆
+            machine = null;
+            if (wake != null) { wake.Dispose(); wake = null; }
             if (!string.IsNullOrEmpty(micDevice) && Microphone.IsRecording(micDevice))
                 Microphone.End(micDevice);
             micClip = null;
@@ -133,122 +192,55 @@ namespace DouyinLive
             cancel = null;
         }
 
-        void TryStartKeyword()
-        {
-            keywordMode = false;
-            recognizing = false;
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR
-            if (!KeywordWake)
-            {
-                Debug.Log("[Voice] 已配置为音量检测模式（douyinVoiceKeywordWake=false）");
-                return;
-            }
-            try
-            {
-                if (!PhraseRecognitionSystem.isSupported)
-                {
-                    Debug.Log("[Voice] 系统不支持语音识别（多半没装中文语音包），降级音量检测模式");
-                    return;
-                }
-                recognizer = new KeywordRecognizer(WakeWords.ToArray(), ConfidenceLevel.Medium);
-                recognizer.OnPhraseRecognized += OnPhraseRecognized;
-                recognizer.Start();
-                keywordMode = true;
-                recognizing = true;
-            }
-            catch (Exception ex)
-            {
-                Debug.Log("[Voice] 关键词唤醒启动失败，降级音量检测模式：" + ex.Message);
-                if (recognizer != null) { recognizer.Dispose(); recognizer = null; }
-                keywordMode = false;
-            }
-#endif
-        }
-
-        void TryStopKeyword()
-        {
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR
-            if (recognizer != null)
-            {
-                recognizer.OnPhraseRecognized -= OnPhraseRecognized;
-                try { recognizer.Stop(); } catch { /* 已停就随它去 */ }
-                recognizer.Dispose();
-                recognizer = null;
-            }
-            recognizing = false;
-#endif
-        }
-
-        // 角色出声期间把识别器停掉（它还在监听麦克风的话会把角色自己的话当输入）
-        void SetRecognitionActive(bool on)
-        {
-            if (!keywordMode || recognizing == on) return;
-            recognizing = on;
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR
-            try { if (on) recognizer?.Start(); else recognizer?.Stop(); }
-            catch (Exception ex) { if (debugLog) Debug.Log("[Voice] 切换识别状态失败: " + ex.Message); }
-#endif
-        }
-
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR
-        // 识别回调来自语音识别的后台线程：这里绝不碰 Unity API（enabled 是原生
-        // getter，后台线程一碰就抛 get_enabled 异常），转主线程处理。Drain 每帧跑
-        // （Manager.Update 第一行），延迟 ≤1 帧，PreWake 3 秒回看完全吸收。
-        void OnPhraseRecognized(PhraseRecognizedEventArgs args)
-        {
-            var text = args.text;
-            var conf = args.confidence;
-            MainThreadDispatcher.Post(() => OnWakeFromMainThread(text, conf));
-        }
-
-        void OnWakeFromMainThread(string text, ConfidenceLevel conf)
-        {
-            if (this == null || !enabled) return;
-            if (asrInFlight || buffer == null) return;
-            buffer.NotifyWake();
-            if (debugLog) Debug.Log($"[Voice] 唤醒: {text} ({conf})");
-        }
-#endif
-
-        bool IsPerforming()
-        {
-            if (speech != null && (speech.IsSpeaking || speech.QueueCount > 0)) return true;
-            if (song != null && song.IsPlaying) return true;
-            // MMD 舞包的点歌/点舞/礼物舞用 AvatarDanceHandler 自己的 AudioSource 放原曲，
-            // 不经 SongService——漏了它，MMD 表演期间监听不暂停，歌声会进识别
-            if (mmdDance == null && Time.unscaledTime >= mmdNextFind)
-            {
-                mmdDance = FindFirstObjectByType<CustomDancePlayer.AvatarDanceHandler>();
-                mmdNextFind = Time.unscaledTime + 5f;   // 场景里没有时限频重找，别每帧扫
-            }
-            return mmdDance != null && mmdDance.audioSource != null && mmdDance.audioSource.isPlaying;
-        }
-
         void Update()
         {
             if (asr == null || manager == null || buffer == null) return;   // 未装配/麦克风没起来
 
-            // 防自触发闭环：角色出声期间停识别、清缓冲、丢积压，说完自然恢复
-            if (PauseWhilePerforming && IsPerforming())
+            // 停播、菜单打开：中止会话（恢复音乐和播报），丢弃这段时间的音频
+            if (manager.VoiceBlocked)
             {
-                SetRecognitionActive(false);
-                buffer.Clear();
+                if (!blockedLastFrame && machine != null) Execute(machine.Abort());
+                blockedLastFrame = true;
                 lastReadPos = Microphone.GetPosition(micDevice);
-                vadRms = 0f;
+                buffer.Clear();
                 vadLoudSince = -1f;
                 return;
             }
-            SetRecognitionActive(true);
+            blockedLastFrame = false;
 
-            ReadMicIntoBuffer();
+            if (machine != null) UpdateSherpa();
+            else UpdateVad();
+        }
 
-            // VAD 降级模式：连续 0.3 秒超阈值当作起音（关键词模式唤醒交给识别器）
-            if (!keywordMode && !asrInFlight)
+        void UpdateSherpa()
+        {
+            float now = Time.unscaledTime;
+            var chunk = ReadMic();
+            bool talking = speech != null && speech.IsTalking;
+            bool performing = IsPerforming();
+            if (chunk != null && wake.Feed(chunk, chunk.Length, micClip.frequency))
             {
-                if (vadRms >= VadStartRms)
-                {
-                    if (vadLoudSince < 0f) vadLoudSince = Time.unscaledTime;
-                }
+                if (debugLog) Debug.Log("[Voice] 唤醒: " + wake.LastKeyword);
+                Execute(machine.OnWake(now, talking, performing));
+            }
+            if (machine != null)
+                Execute(machine.Update(now, chunk != null && frameRms >= VoicedRms, talking, performing));
+        }
+
+        // 音量检测模式（v1 行为）：角色出声期间暂停监听防自触发；起音即唤醒；靠静音判定说完
+        void UpdateVad()
+        {
+            if (IsCharacterAudible())
+            {
+                buffer.Clear();
+                lastReadPos = Microphone.GetPosition(micDevice);
+                vadLoudSince = -1f;
+                return;
+            }
+            ReadMic();
+            if (!asrInFlight)
+            {
+                if (frameRms >= VadStartRms) { if (vadLoudSince < 0f) vadLoudSince = Time.unscaledTime; }
                 else vadLoudSince = -1f;
                 if (vadLoudSince >= 0f && Time.unscaledTime - vadLoudSince >= VadStartSeconds)
                 {
@@ -257,18 +249,19 @@ namespace DouyinLive
                     if (debugLog) Debug.Log("[Voice] 音量检测唤醒");
                 }
             }
-
             if (!asrInFlight && buffer.UtteranceReady && buffer.TryTakeUtterance(out var samples))
                 SubmitToAsr(samples);
         }
 
-        void ReadMicIntoBuffer()
+        // 读出本帧新增的麦克风采样（跨环绕点分两段），推进录音缓冲，算本帧 RMS
+        float[] ReadMic()
         {
-            if (micClip == null || string.IsNullOrEmpty(micDevice)) return;
+            frameRms = 0f;
+            if (micClip == null || string.IsNullOrEmpty(micDevice)) return null;
             int pos = Microphone.GetPosition(micDevice);
             int total = micClip.samples;
             int available = pos >= lastReadPos ? pos - lastReadPos : total - lastReadPos + pos;
-            if (available <= 0) { vadRms = 0f; return; }
+            if (available <= 0) return null;
             if (available > total) available = total;
 
             var chunk = new float[available];
@@ -279,7 +272,6 @@ namespace DouyinLive
             }
             else
             {
-                // 跨环绕点分两段读
                 var head = new float[first];
                 micClip.GetData(head, lastReadPos);
                 Array.Copy(head, 0, chunk, 0, first);
@@ -291,17 +283,114 @@ namespace DouyinLive
 
             double sum = 0;
             for (int i = 0; i < available; i++) sum += (double)chunk[i] * chunk[i];
-            vadRms = (float)Math.Sqrt(sum / available);
+            frameRms = (float)Math.Sqrt(sum / available);
             buffer.Push(chunk);
+            return chunk;
+        }
+
+        void Execute(IReadOnlyList<VoiceAction> actions)
+        {
+            if (actions == null || actions.Count == 0) return;
+            // 状态机返回的是内部复用列表；执行中的回调（应答没音频时同步回调 OnAckFinished）
+            // 会再次调用状态机改写它，必须先拷贝
+            var list = new VoiceAction[actions.Count];
+            for (int i = 0; i < list.Length; i++) list[i] = actions[i];
+
+            foreach (var a in list)
+            {
+                switch (a)
+                {
+                    case VoiceAction.InterruptSpeech: speech?.InterruptCurrent(); break;
+                    case VoiceAction.HoldSpeech: speech?.SetHold(true); break;
+                    case VoiceAction.ReleaseSpeech: speech?.SetHold(false); break;
+                    case VoiceAction.DuckMusic: DuckMusic(); break;
+                    case VoiceAction.UnduckMusic: UnduckMusic(); break;
+                    case VoiceAction.StartCapture: buffer?.NotifyWake(WakePreRoll); break;
+                    case VoiceAction.StartCaptureAfterAck: buffer?.NotifyWake(0f); break;
+                    case VoiceAction.StopCapture: buffer?.Reset(); break;
+                    case VoiceAction.PlayAck:
+                        if (speech != null) ackLines.PlayAck(speech, OnAckFinished);
+                        else OnAckFinished();
+                        break;
+                    case VoiceAction.SubmitCapture:
+                        if (buffer != null && buffer.TakeArmed(out var samples)) SubmitToAsr(samples);
+                        else if (machine != null) Execute(machine.OnTranscript(Time.unscaledTime, null));
+                        break;
+                    case VoiceAction.Inject:
+                        if (machine != null && !string.IsNullOrEmpty(machine.PendingCommand))
+                        {
+                            if (debugLog) Debug.Log("[Voice] 命令: " + machine.PendingCommand);
+                            manager?.InjectVoiceChat(machine.PendingCommand);
+                        }
+                        break;
+                    case VoiceAction.SayNotHeard:
+                        if (speech != null) ackLines.PlayNotHeard(speech);
+                        break;
+                }
+            }
+        }
+
+        void OnAckFinished()
+        {
+            if (this == null || !enabled || machine == null) return;
+            Execute(machine.OnAckFinished(Time.unscaledTime));
+        }
+
+        void DuckMusic()
+        {
+            song?.Duck(cfg.DuckVolume);
+            FindMmd();
+            if (mmdDance != null && mmdDance.audioSource != null && mmdVolumeBeforeDuck < 0f)
+            {
+                mmdVolumeBeforeDuck = mmdDance.audioSource.volume;
+                mmdDance.audioSource.volume = mmdVolumeBeforeDuck * cfg.DuckVolume;
+            }
+        }
+
+        void UnduckMusic()
+        {
+            song?.Unduck();
+            // 恢复到压低前的原音量，而不是 1：MMD 舞包可能本来就不是满音量
+            if (mmdVolumeBeforeDuck >= 0f && mmdDance != null && mmdDance.audioSource != null)
+                mmdDance.audioSource.volume = mmdVolumeBeforeDuck;
+            mmdVolumeBeforeDuck = -1f;
+        }
+
+        void FindMmd()
+        {
+            if (mmdDance == null && Time.unscaledTime >= mmdNextFind)
+            {
+                mmdDance = FindFirstObjectByType<CustomDancePlayer.AvatarDanceHandler>();
+                mmdNextFind = Time.unscaledTime + 5f;   // 场景里没有时限频重找，别每帧扫
+            }
+        }
+
+        // 在唱歌/跳舞（SongService 点歌，或 MMD 舞包/礼物舞的原曲）
+        bool IsPerforming()
+        {
+            if (song != null && song.IsPlaying) return true;
+            FindMmd();
+            return mmdDance != null && mmdDance.audioSource != null && mmdDance.audioSource.isPlaying;
+        }
+
+        // 音量检测模式用：角色任何出声（说话、排队待说、唱歌）都暂停监听
+        bool IsCharacterAudible()
+        {
+            if (speech != null && (speech.IsSpeaking || speech.QueueCount > 0)) return true;
+            return IsPerforming();
         }
 
         void SubmitToAsr(float[] samples)
         {
             byte[] wav;
             try { wav = WavEncoder.Encode(samples, buffer.SampleRate); }
-            catch (Exception ex) { if (debugLog) Debug.Log("[Voice] WAV 编码失败: " + ex.Message); return; }
-
-            asrInFlight = true;   // 在飞期间忽略新唤醒，防连发重入
+            catch (Exception ex)
+            {
+                if (debugLog) Debug.Log("[Voice] WAV 编码失败: " + ex.Message);
+                if (machine != null) Execute(machine.OnTranscript(Time.unscaledTime, null));
+                return;
+            }
+            asrInFlight = true;   // 音量检测模式：在飞期间忽略新起音
             var ct = cancel != null ? cancel.Token : CancellationToken.None;
             _ = TranscribeAndSubmit(wav, ct);
         }
@@ -318,14 +407,25 @@ namespace DouyinLive
 
         void HandleTranscript(string text)
         {
+            if (this == null) return;
             asrInFlight = false;
+
+            if (machine != null)
+            {
+                // sherpa 已确认唤醒，文本里找不到唤醒词也放行；null = ASR 失败
+                string cmd = text == null ? null : VoiceCommandParser.ExtractCommand(text, cfg.WakeWords, false);
+                if (debugLog) Debug.Log($"[Voice] 转写: {text ?? "(失败)"} → 命令: {cmd ?? "(无)"}");
+                Execute(machine.OnTranscript(Time.unscaledTime, cmd));
+                return;
+            }
+
+            // 音量检测模式：文本里必须有唤醒词
             if (string.IsNullOrEmpty(text))
             {
                 if (debugLog) Debug.Log("[Voice] ASR 无结果");
                 return;
             }
-            // 关键词模式信任识别器（文本里找不到唤醒词也放行）；VAD 模式必须有
-            string command = VoiceCommandParser.ExtractCommand(text, WakeWords, !keywordMode);
+            string command = VoiceCommandParser.ExtractCommand(text, cfg.WakeWords, true);
             if (command == null)
             {
                 if (debugLog) Debug.Log("[Voice] 无唤醒词，丢弃: " + text);

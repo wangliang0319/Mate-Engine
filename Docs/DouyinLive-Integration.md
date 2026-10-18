@@ -94,8 +94,13 @@
 "douyinVoiceAsrModel": "FunAudioLLM/SenseVoiceSmall",
 "douyinVoiceCommandWindow": 8.0,   // 唤醒后最长录音秒数
 "douyinVoiceSilenceSeconds": 1.2,  // 静音多久算说完
-"douyinVoicePauseWhilePerforming": true,
-"douyinVoiceKeywordWake": true,    // false=强制音量检测模式（与本地识别器抢设备时的逃生门）
+"douyinVoiceKeywordWake": true,    // true=sherpa 离线唤醒（推荐）；false=音量检测模式（必须一口气说完）
+"douyinVoiceWakeKeywords": ["x iǎo m ěi x iǎo m ěi @小美小美"],  // 离线唤醒词：带声调拼音，声母韵母分开，@ 后写显示名
+"douyinVoiceAckLines": ["我在～", "嗯？", "你说～", "在呢"],      // 唤醒应答，开播时预合成
+"douyinVoiceAckTimeout": 5.0,      // 应答后多久没开口就放弃
+"douyinVoiceFollowUpSeconds": 6.0, // 她回答后可直接追问的窗口，0=关闭
+"douyinVoiceDuckVolume": 0.3,      // 唤醒时歌声压低到的比例
+// douyinVoicePauseWhilePerforming 已废弃（v2 改为打断她、压低歌声、暂停播报）
 "douyinVoiceNickname": "主播",
 "douyinVoiceRelayEnabled": true,   // 传话总开关；false=语音一律走聊天
 "douyinVoiceRelayPrefixes": ["告诉大家", "跟大家说", "和大家说", "给大家说", "通知大家", "提醒大家", "转告大家"],
@@ -153,10 +158,13 @@ auto       自动模式(含随机点歌/点舞/大礼物)     q 退出
 - **点歌打断**：拖拽角色 / 打开菜单 / MMD 自定义舞启动（点舞、礼物舞）→ 立即停唱停跳并还原设置。
 - **点歌优先级**：本地 MMD 同名舞包（真编舞）> 网易云在线（VIP 歌自动落到可播的翻唱版）。
 - **三级降级**：云 LLM→本地 LLMUnity→不回复；云 TTS→(EdgeTTS 已失效)→纯气泡字幕。
-- **语音助手**：麦克风常开环形缓冲（回看 3 秒），本地 KeywordRecognizer 命中唤醒词
-  （系统无中文语音包自动降级音量检测）后录到静音 1.2 秒，WAV 送云端 ASR，文本剥唤醒词
-  后伪装成 `UserId="voice"` 的弹幕进 Route()——触发规则/追问槽位/LLM 意图/点歌换角色全部复用；
-  非命令内容走 AI 闲聊回复（陪播模式也不念出来）。角色出声期间暂停监听防自触发。
+- **语音助手**：sherpa-onnx 离线关键词引擎常驻检测唤醒词（约 2% CPU，模型在
+  `StreamingAssets/SherpaOnnx/kws`），会话状态机按手机助手方式交互：唤醒后停顿就播一句预合成
+  应答再聆听，一口气说完则直接录；她说话时唤醒会打断当前句、唱歌时压低歌声；主播说话期间
+  播报队列暂停；她回答后 6 秒内可直接追问。录音送云端 ASR，文本剥唤醒词后伪装成
+  `UserId="voice"` 的弹幕进 Route()——触发规则/追问槽位/LLM 意图/点歌换角色全部复用；
+  非命令内容走 AI 闲聊回复（陪播模式也不念出来）。sherpa 加载失败退回音量检测模式
+  （一口气说完、角色出声期间暂停监听）。
   句首带开头词（「告诉大家…」）的话在进 Route() 之前就判为传话：剥掉开头词、原话进播报队列
   （不过 AI 人设/敏感词通路，后半句带「唱/歌」也不会被当成点歌）；其余照常走命令/聊天。
   可选的大模型兜底（VoiceIntentRouter，≤1.5 秒）默认关。
@@ -199,6 +207,9 @@ DouyinLiveClient → DouyinLiveManager.Route()
   没有转写模型通道（症状：debugLog 里 `[VoiceASR] HTTP 503 ... model_not_found`，语音永远
   「ASR 无结果」）。把 `douyinVoiceAsrBaseUrl/ApiKey` 指到有转写接口的服务商即可（SiliconFlow
   实测可用，模型保持 `FunAudioLLM/SenseVoiceSmall`）。
+- 语音交互 v2：没有回声消除，建议戴耳机（外放时她的应答和歌声可能被录进指令）；离线唤醒词要写
+  带声调的拼音（`x iǎo m ěi`，声母韵母分开），写错的音节启动日志会指出；sherpa 原生库约 22MB、
+  模型约 13MB，打包体积相应增加。
 
 ## 语音助手自测步骤（需真机麦克风）
 
@@ -208,16 +219,16 @@ DouyinLiveClient → DouyinLiveManager.Route()
 > 改代码前先停 Play：Play 中途热重载会清空单例，满屏 AvatarBigScreenTimer/Blink 报错
 > （建议 Preferences → General → Script Changes While Playing 设为 Recompile After Finished Playing）。
 
-1. settings.json 开 `douyinVoiceEnabled`，确认 ASR 配置可用（复用 AI 的 key 时 aiBaseUrl 服务商必须有转写接口）
-2. 说「小美小美 唱一首黄昏」→ 她开口应答并开唱+跟舞
-3. 说「小美小美 今天直播什么好」→ AI 开口聊
-4. 她正在说话/唱歌时喊唤醒词 → 不响应；说完恢复
-5. F9 切游戏陪播后再试 2/3 → 命令照常执行、闲聊走 AI（不被念出来）
-6. 不说话/放游戏声 → 无动作（开 debugLog 看无 ASR 请求）
-7. 连续说话 15 秒以上再唤醒 → 仍能识别完整命令（环形缓冲跨环绕点）
-8. 开 debugLog 喊一次唤醒词 → 日志出现 `[Voice] 唤醒:` 且无 UnityException（有异常说明唤醒回调线程有问题，截图反馈）
-9. 一口气说「小美小美 告诉大家八点下播」→ 她立刻原样播出「八点下播」（不续唠）；隔 3 秒再说一条 → 两条都播出。
-   预期日志：`[Voice] 命令: 告诉大家八点下播` → `[DouyinLive] 传话播出: 八点下播`
-10. 说「小美小美 今天唱什么好」→ AI 对话回复（不是播出你的问题），且没有「传话播出」日志
-11. 说「小美小美 告诉大家唱完这首有抽奖」→ 原样播出「唱完这首有抽奖」，不会被当成点歌
+1. settings.json 开 `douyinVoiceEnabled`，确认 ASR 配置可用；启动日志出现 `[Voice] 已启动 ... 模式=离线唤醒(sherpa)`
+2. 连续喊「小美小美」10 次（间隔两三秒）→ 每次都应答（日志 `[Voice] 唤醒`）
+3. 喊「小美小美」后停下 → 她说「我在～」之类并弹气泡「我在听～」→ 再说「唱一首黄昏」→ 开唱+跟舞
+4. 一口气说「小美小美唱一首黄昏」→ 不应答，直接执行
+5. 喊「小美小美」后 5 秒不说话 → 安静回待机，不报错
+6. 说「小美小美 今天直播什么好」→ AI 开口聊；她说完后 6 秒内直接说「那就聊游戏吧」（不喊唤醒词）→ 她接着回答
+7. 她唱歌时喊「小美小美」→ 歌声明显变小，说完指令后恢复
+8. 游戏陪播模式她念弹幕时喊「小美小美」→ 当前这句被打断、她应答；指令处理完后接着念剩下的弹幕
+9. 一口气说「小美小美 告诉大家八点下播」→ 立刻原样播出「八点下播」
+10. 说「小美小美 今天唱什么好」→ AI 对话回复，没有「传话播出」日志
+11. 说「小美小美 告诉大家唱完这首有抽奖」→ 原样播出，不会被当成点歌
 12. settings.json 设 `douyinVoiceRelayEnabled=false`（重启生效）→ 第 9 条变成 AI 对话回复。改回 true 再重启可恢复
+13. 把 `Assets/Plugins/SherpaOnnx/x86_64/sherpa-onnx-c-api.dll` 临时改名后启动 → 日志警告「退回音量检测模式」，一口气说「小美小美唱一首黄昏」仍能用；测完改回

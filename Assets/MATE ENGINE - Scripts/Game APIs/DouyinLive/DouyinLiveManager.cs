@@ -234,9 +234,19 @@ namespace DouyinLive
                 // 别让关着的功能用默认参数开一次真麦克风
                 voiceListener.enabled = false;
             }
-            voiceListener.Configure(speech, songService, this, asrProvider,
-                d.douyinVoiceWakeWords, d.douyinVoiceCommandWindow, d.douyinVoiceSilenceSeconds,
-                d.douyinVoicePauseWhilePerforming, d.douyinVoiceKeywordWake, debugLog);
+            voiceListener.Configure(speech, songService, this, asrProvider, new VoiceListenerSettings
+            {
+                WakeWords = d.douyinVoiceWakeWords,
+                WakeKeywords = d.douyinVoiceWakeKeywords,
+                AckLines = d.douyinVoiceAckLines,
+                CommandWindow = d.douyinVoiceCommandWindow,
+                SilenceSeconds = d.douyinVoiceSilenceSeconds,
+                AckTimeout = d.douyinVoiceAckTimeout,
+                FollowUpSeconds = d.douyinVoiceFollowUpSeconds,
+                DuckVolume = d.douyinVoiceDuckVolume,
+                KeywordWake = d.douyinVoiceKeywordWake,
+                DebugLog = debugLog
+            });
             bool wantVoice = d.enableDouyinLive && d.douyinVoiceEnabled;
             voiceListener.enabled = wantVoice && asrProvider.IsAvailable;
             if (wantVoice && !asrProvider.IsAvailable)
@@ -438,6 +448,9 @@ namespace DouyinLive
         }
 
         // ---------- 语音助手：麦克风命令伪装成弹幕进同一条链路 ----------
+
+        // 语音监听器每帧查询：停播或菜单打开时中止会话、恢复音乐和播报
+        public bool VoiceBlocked => !running || IsBlocked();
 
         // VoiceCommandListener 转写完成后的唯一入口。停播/菜单打开时静默丢弃——
         // 与弹幕「消费不响应」一致；在途 ASR 回调晚于停播到达也在这道闸拦住。
