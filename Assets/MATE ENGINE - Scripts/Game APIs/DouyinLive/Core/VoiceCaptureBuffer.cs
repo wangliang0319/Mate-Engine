@@ -22,6 +22,7 @@ namespace DouyinLive
         bool armed;            // 唤醒之后 true
         long wakeSample;       // 唤醒时刻的累计样本序号
         long silenceSamples;   // 唤醒后连续静音样本数
+        float armedPreRoll;    // 本次唤醒的回看秒数（v2 按场合给：唤醒 0.6s、应答后 0s）
 
         public bool Armed { get { return armed; } }
 
@@ -75,12 +76,16 @@ namespace DouyinLive
             else silenceSamples = 0;                                              // 出声就重来
         }
 
-        public void NotifyWake()
+        public void NotifyWake() { NotifyWake(PreWakeSeconds); }
+
+        // v2：sherpa 给出的唤醒时刻精确，回看只需盖住起音；应答刚播完时回看会录进她的声音，要给 0
+        public void NotifyWake(float preRollSeconds)
         {
             if (armed) return;   // 已唤醒忽略（关键词连发）
             armed = true;
             wakeSample = totalWritten;
             silenceSamples = 0;
+            armedPreRoll = Math.Max(0f, preRollSeconds);
         }
 
         public bool UtteranceReady
@@ -93,23 +98,38 @@ namespace DouyinLive
             }
         }
 
-        // 返回 [唤醒前 PreWake 秒 + 唤醒后全部]，取完复位回待唤醒。缓冲里的旧音频
-        // 保留继续滚（下一次唤醒的 PreWake 还能用它）。
+        // 返回 [唤醒前回看 + 唤醒后全部]，取完复位回待唤醒。缓冲里的旧音频
+        // 保留继续滚（下一次唤醒的回看还能用它）。
         public bool TryTakeUtterance(out float[] samples)
         {
             samples = null;
             if (!armed || !UtteranceReady) return false;
+            samples = SliceArmed();
+            Reset();
+            return true;
+        }
 
-            long start = wakeSample - (long)(PreWakeSeconds * SampleRate);
+        // v2：「说完没有」由会话状态机判定，这里不看静音，已唤醒就交出
+        public bool TakeArmed(out float[] samples)
+        {
+            samples = null;
+            if (!armed) return false;
+            samples = SliceArmed();
+            Reset();
+            return true;
+        }
+
+        float[] SliceArmed()
+        {
+            long start = wakeSample - (long)(armedPreRoll * SampleRate);
             if (start < totalWritten - ring.Length) start = totalWritten - ring.Length;
             if (start < 0) start = 0;
 
             int count = (int)(totalWritten - start);
-            samples = new float[count];
+            var samples = new float[count];
             for (int i = 0; i < count; i++)
                 samples[i] = ring[(int)((start + i) % ring.Length)];
-            Reset();
-            return true;
+            return samples;
         }
 
         public void Reset()

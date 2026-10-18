@@ -140,5 +140,66 @@ namespace DouyinLive.Tests
             Assert.IsFalse(b.TryTakeUtterance(out s));
             Assert.IsFalse(b.UtteranceReady);
         }
+
+        // ---------- v2：按需回看 + 无条件取出 ----------
+
+        [Test]
+        public void 指定回看秒数_只回看指定长度()
+        {
+            var b = new VoiceCaptureBuffer(1000, 3f, 1f, 0.2f, 0.05f);
+            b.Push(Tone(0.2f, 2000));
+            b.NotifyWake(0.5f);
+            b.Push(Tone(0.2f, 300));
+            Assert.IsTrue(b.TakeArmed(out var s));
+            Assert.AreEqual(800, s.Length);   // 500 回看 + 300 唤醒后
+        }
+
+        [Test]
+        public void 零回看_只含唤醒后()
+        {
+            var b = new VoiceCaptureBuffer(1000, 3f, 1f, 0.2f, 0.05f);
+            b.Push(Tone(0.2f, 2000));
+            b.NotifyWake(0f);
+            b.Push(Tone(0.2f, 300));
+            Assert.IsTrue(b.TakeArmed(out var s));
+            Assert.AreEqual(300, s.Length);
+        }
+
+        [Test]
+        public void TakeArmed不等静音判定()
+        {
+            // v2 的「说完没有」由状态机决定，缓冲区只负责交出音频
+            var b = new VoiceCaptureBuffer(1000, 3f, 1f, 0.2f, 0.05f);
+            b.NotifyWake(0f);
+            b.Push(Tone(0.2f, 100));
+            Assert.IsFalse(b.UtteranceReady);
+            Assert.IsTrue(b.TakeArmed(out var s));
+            Assert.AreEqual(100, s.Length);
+        }
+
+        [Test]
+        public void 未唤醒TakeArmed失败()
+        {
+            var b = new VoiceCaptureBuffer(1000, 3f, 1f, 0.2f, 0.05f);
+            b.Push(Tone(0.2f, 100));
+            Assert.IsFalse(b.TakeArmed(out var s));
+            Assert.IsNull(s);
+        }
+
+        [Test]
+        public void TakeArmed后复位_旧接口回看不受影响()
+        {
+            var b = new VoiceCaptureBuffer(1000, 0.1f, 1f, 0.2f, 0.05f);
+            b.NotifyWake(0f);
+            b.Push(Tone(0.2f, 100));
+            b.TakeArmed(out _);
+            Assert.IsFalse(b.Armed);
+            b.Push(Tone(0.2f, 500));
+            b.NotifyWake();                    // 旧接口：回看 PreWakeSeconds=0.1s
+            b.Push(Tone(0.2f, 300));
+            b.Push(new float[250]);
+            Assert.IsTrue(b.TryTakeUtterance(out var s));
+            Assert.AreEqual(650, s.Length);    // 100 pre + 300 + 250
+        }
     }
 }
