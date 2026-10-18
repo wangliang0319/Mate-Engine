@@ -188,8 +188,16 @@ DouyinLiveClient → DouyinLiveManager.Route()
 - 语音助手：ASR 同音字转错歌名等同观众打错字，属正常容错；VAD 降级模式下直播外放声也会被
   送识别（有防自触发暂停兜底，口误提到唤醒词仍可能误触发）；唤醒词嵌在句子中间会被整段剥掉
   （正常唤醒词在句首，不踩）。
+- 语音传话：传话/聊天由 LLM 一次分类判定（≤1.5 秒），偶有误判——想说给角色的话被播了出去、
+  想说给观众的话被她接了嘴，换个说法即可。句里带「唱/歌/舞/换」等表演词会先过表演判定
+  再走传话分类，两次 LLM 串行最坏多等 ~3 秒。传话是主播原话直出（ASR 转出什么播什么，
+  含口语停顿和重复），不过 AI 人设与敏感词通路。
 
 ## 语音助手自测步骤（需真机麦克风）
+
+> 调试开关：Unity Editor 里 DouyinLiveManager 组件 Inspector 的 **Debug Log** 勾选项。
+> 开启后 Console/日志能看到 `[Voice]`（唤醒/转写）、`[VoiceIntentRouter]`（传话分类）、
+> `[DouyinLive]`（传话播出）三组关键日志，下面的预期日志都以它为准。
 
 1. settings.json 开 `douyinVoiceEnabled`，确认 ASR 配置可用（复用 AI 的 key 时 aiBaseUrl 服务商必须有转写接口）
 2. 说「小美小美 唱一首黄昏」→ 她开口应答并开唱+跟舞
@@ -199,6 +207,10 @@ DouyinLiveClient → DouyinLiveManager.Route()
 6. 不说话/放游戏声 → 无动作（开 debugLog 看无 ASR 请求）
 7. 连续说话 15 秒以上再唤醒 → 仍能识别完整命令（环形缓冲跨环绕点）
 8. 开 debugLog 喊一次唤醒词 → 日志出现 `[Voice] 唤醒:` 且无 UnityException（有异常说明唤醒回调线程有问题，截图反馈）
-9. 说「小美小美 等会儿有抽奖哦」→ 她原样播出这句话（不续唠）；隔 3 秒再说一条 → 两条都播出（无冷却）
-10. 说「小美小美 今天唱什么好」→ AI 对话回复（不是播出你的问题）
-11. settings.json 设 `douyinVoiceRelayEnabled=false` → 第 9 条变成 AI 对话回复（回到纯聊天）
+9. 说「小美小美 等会儿有抽奖哦」→ 她原样播出这句话（不续唠）；隔 3 秒再说一条 → 两条都播出（无冷却）。
+   预期日志：`[VoiceIntentRouter] 「等会儿有抽奖哦」→ 传话` → `[DouyinLive] 传话播出: 等会儿有抽奖哦`
+10. 说「小美小美 今天唱什么好」→ AI 对话回复（不是播出你的问题）。预期日志：该句 → 聊天
+11. settings.json 设 `douyinVoiceRelayEnabled=false`（重启生效）→ 第 9 条变成 AI 对话回复（回到纯聊天，
+    且无 `[VoiceIntentRouter]` 日志）。改回 true 再重启可恢复
+12. （可选）句中带表演词的传话，如「小美小美 唱完这首告诉大家有抽奖哦」→ 先过表演判定
+    （判不是点歌）再走传话分类，最终原样播出；唤醒到播出最坏 ~3 秒属正常
