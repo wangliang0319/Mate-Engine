@@ -51,6 +51,7 @@ namespace DouyinLive
         OpenAICompatTTS cloudTTS;
         EdgeTTSProvider edgeTTS;
         CloudASRProvider asrProvider;
+        VoiceCommandListener voiceListener;
 
         bool running;
 
@@ -209,6 +210,20 @@ namespace DouyinLive
             else
                 portrait.RestoreDesktopWindow();   // 上次竖屏的窗口尺寸会被 Unity 记住，必须显式改回来
 
+            // ---------- 语音助手：麦克风唤醒 → 云端 ASR → 伪装弹幕进 Route() ----------
+            asrProvider ??= new CloudASRProvider();
+            asrProvider.BaseUrl = string.IsNullOrWhiteSpace(d.douyinVoiceAsrBaseUrl) ? d.aiBaseUrl : d.douyinVoiceAsrBaseUrl;
+            asrProvider.ApiKey = string.IsNullOrWhiteSpace(d.douyinVoiceAsrApiKey) ? d.aiApiKey : d.douyinVoiceAsrApiKey;
+            asrProvider.Model = string.IsNullOrWhiteSpace(d.douyinVoiceAsrModel) ? "FunAudioLLM/SenseVoiceSmall" : d.douyinVoiceAsrModel;
+            asrProvider.debugLog = debugLog;
+
+            if (voiceListener == null) voiceListener = gameObject.AddComponent<VoiceCommandListener>();
+            voiceListener.Configure(speech, songService, this, asrProvider,
+                d.douyinVoiceWakeWords, d.douyinVoiceCommandWindow, d.douyinVoiceSilenceSeconds,
+                d.douyinVoicePauseWhilePerforming, debugLog);
+            bool wantVoice = d.enableDouyinLive && d.douyinVoiceEnabled;
+            voiceListener.enabled = wantVoice && asrProvider.IsAvailable;
+
             // 连接
             bool shouldRun = d.enableDouyinLive;
             if (shouldRun && !running) StartLive(d.douyinWsUrl);
@@ -234,6 +249,7 @@ namespace DouyinLive
             idleChatter.ResetSession();
             if (triggers != null) triggers.ResetSession();
             intents.Reset();
+            voiceListener?.ResetSession();
             if (debugLog) Debug.Log("[DouyinLive] Started, connecting " + url);
         }
 
@@ -247,6 +263,7 @@ namespace DouyinLive
             // MainThreadDispatcher，不受下面 Update 的 running 早退保护，所以这里
             // 要把在等的请求和追问槽位一起清掉，别让角色在停播后自己动起来。
             intents.Reset();
+            voiceListener?.ResetSession();   // 丢弃在途转写，停播后语音不动作
             if (triggers != null) triggers.ResetSession();
         }
 
