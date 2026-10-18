@@ -226,6 +226,20 @@ public class SaveLoadHandler : MonoBehaviour
             "大鱼", "典狱司", "精卫", "画离弦", "殊途", "山外小楼夜听雨"
         };
 
+        // ---------- 语音助手（麦克风控制角色，见 Docs/superpowers/specs/2026-10-18-douyin-voice-control-design.md） ----------
+        public bool douyinVoiceEnabled = false;
+        // 唤醒词列表：包含即命中；建议放角色人设的名字和叠字变体（「小美」能接住「小美小美」）
+        public List<string> douyinVoiceWakeWords = new() { "小美小美", "小美" };
+        // 云端 ASR（OpenAI 兼容 /v1/audio/transcriptions）；留空复用 aiBaseUrl/aiApiKey
+        public string douyinVoiceAsrBaseUrl = "";
+        public string douyinVoiceAsrApiKey = "";
+        // SiliconFlow 用 FunAudioLLM/SenseVoiceSmall；OpenAI 官方用 whisper-1
+        public string douyinVoiceAsrModel = "FunAudioLLM/SenseVoiceSmall";
+        public float douyinVoiceCommandWindow = 8f;         // 唤醒后最长录音秒数（装配时钳 2~15）
+        public float douyinVoiceSilenceSeconds = 1.2f;      // 静音多久算说完（装配时钳 0.5~3）
+        public bool douyinVoicePauseWhilePerforming = true; // 角色出声时暂停监听，防自触发
+        public string douyinVoiceNickname = "主播";          // 语音事件在观众记忆/上下文里的名字
+
         // Cloud AI (OpenAI 兼容)
         public string aiBaseUrl = "";
         public string aiApiKey = "";

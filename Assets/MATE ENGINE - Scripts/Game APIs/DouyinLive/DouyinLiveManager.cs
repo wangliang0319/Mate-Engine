@@ -50,6 +50,7 @@ namespace DouyinLive
         LocalChatBackend localBackend;
         OpenAICompatTTS cloudTTS;
         EdgeTTSProvider edgeTTS;
+        CloudASRProvider asrProvider;
 
         bool running;
 
