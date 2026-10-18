@@ -31,7 +31,10 @@ namespace DouyinLive
             if (!IsAvailable || wav == null || wav.Length == 0) return null;
             try
             {
-                using var form = new MultipartFormDataContent();
+                // form 不能 using：req.Content = form 之后由 req 负责释放。再 using 一次就是
+                // 双重 Dispose，Unity 的 Mono 版 MultipartContent.Dispose 不幂等，第二次空引用，
+                // 而且发生在方法收尾，会把已经拿到的转写结果覆盖成异常（实测 HTTP 200 照样失败）
+                var form = new MultipartFormDataContent();
                 var file = new ByteArrayContent(wav);
                 file.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
                 form.Add(file, "file", "audio.wav");
@@ -44,14 +47,13 @@ namespace DouyinLive
                 req.Content = form;
 
                 using var resp = await http.SendAsync(req, ct);
-                // 代理/网关故障会给出 Content 为 null 的响应（实测系统代理 127.0.0.1:8827 偶发），
-                // 不判空会把真实错误糊成一句 Object reference not set
-                var body = resp.Content != null ? await resp.Content.ReadAsStringAsync() : "";
+                var body = await resp.Content.ReadAsStringAsync();
                 if (!resp.IsSuccessStatusCode)
                 {
                     if (debugLog) Debug.LogWarning($"[VoiceASR] HTTP {(int)resp.StatusCode}: {Truncate(body)}");
                     return null;
                 }
+                if (debugLog) Debug.Log($"[VoiceASR] HTTP {(int)resp.StatusCode}: {Truncate(body)}");
                 var text = JsonConvert.DeserializeObject<AsrResponse>(body)?.text;
                 if (string.IsNullOrWhiteSpace(text))
                 {
@@ -63,7 +65,8 @@ namespace DouyinLive
             catch (OperationCanceledException) { return null; }
             catch (Exception ex)
             {
-                if (debugLog) Debug.LogWarning("[VoiceASR] 转写失败：" + ex.Message);
+                // 后台线程的日志不带调用栈，只记 Message 会丢掉异常出在哪一行，必须记完整 ToString
+                if (debugLog) Debug.LogWarning("[VoiceASR] 转写失败：" + ex);
                 return null;
             }
         }
