@@ -238,6 +238,7 @@ public class SaveLoadHandler : MonoBehaviour
         public float douyinVoiceCommandWindow = 8f;         // 唤醒后最长录音秒数（装配时钳 2~15）
         public float douyinVoiceSilenceSeconds = 1.2f;      // 静音多久算说完（装配时钳 0.5~3）
         public bool douyinVoicePauseWhilePerforming = true; // 角色出声时暂停监听，防自触发
+        public bool douyinVoiceKeywordWake = true;          // false=强制音量检测模式（与本地识别器抢设备时的逃生门）
         public string douyinVoiceNickname = "主播";          // 语音事件在观众记忆/上下文里的名字
 
         // Cloud AI (OpenAI 兼容)

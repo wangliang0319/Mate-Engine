@@ -22,11 +22,16 @@ namespace DouyinLive
         public float CommandWindow = 8f;      // 唤醒后最长录音秒数
         public float SilenceSeconds = 1.2f;   // 静音多久算说完
         public bool PauseWhilePerforming = true;
+        public bool KeywordWake = true;       // false=强制音量检测模式（与本地识别器抢设备时的逃生门）
 
         SpeechPipeline speech;      // 角色正在说话？
         SongService song;           // 角色正在唱歌？
         DouyinLiveManager manager;  // 命令上交
         CloudASRProvider asr;
+
+        string collectionKey;   // 影响采集的参数指纹，变了才重启麦克风/识别器
+        CustomDancePlayer.AvatarDanceHandler mmdDance;   // MMD 舞包/礼物舞的原曲不经 SongService，要单独盯
+        float mmdNextFind;
 
         VoiceCaptureBuffer buffer;
         AudioClip micClip;
@@ -49,7 +54,7 @@ namespace DouyinLive
         public void Configure(SpeechPipeline speechPipeline, SongService songService,
                               DouyinLiveManager managerRef, CloudASRProvider asrProvider,
                               List<string> wakeWords, float commandWindow, float silenceSeconds,
-                              bool pauseWhilePerforming, bool debug)
+                              bool pauseWhilePerforming, bool keywordWake, bool debug)
         {
             speech = speechPipeline;
             song = songService;
@@ -59,8 +64,13 @@ namespace DouyinLive
             CommandWindow = Mathf.Clamp(commandWindow, 2f, 15f);
             SilenceSeconds = Mathf.Clamp(silenceSeconds, 0.5f, 3f);
             PauseWhilePerforming = pauseWhilePerforming;
+            KeywordWake = keywordWake;
             debugLog = debug;
-            if (isActiveAndEnabled) { StopMic(); StartMic(); }   // 参数变了重启采集
+            // ApplySettings 高频调用（F9/设置页/测试按钮）：只有影响采集的参数变了
+            // 才重启麦克风和识别器，纯引用赋值不动设备（重启有 100~300ms 拾音空洞）
+            var key = string.Join("|", WakeWords) + "|" + CommandWindow + "|" + SilenceSeconds + "|" + KeywordWake;
+            if (isActiveAndEnabled && key != collectionKey) { StopMic(); StartMic(); }
+            collectionKey = key;
         }
 
         // StartLive/StopLive 调用：丢弃在途转写与缓冲，别让上一场的话进这一场
@@ -128,6 +138,11 @@ namespace DouyinLive
             keywordMode = false;
             recognizing = false;
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR
+            if (!KeywordWake)
+            {
+                Debug.Log("[Voice] 已配置为音量检测模式（douyinVoiceKeywordWake=false）");
+                return;
+            }
             try
             {
                 if (!PhraseRecognitionSystem.isSupported)
@@ -176,19 +191,37 @@ namespace DouyinLive
         }
 
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR
+        // 识别回调来自语音识别的后台线程：这里绝不碰 Unity API（enabled 是原生
+        // getter，后台线程一碰就抛 get_enabled 异常），转主线程处理。Drain 每帧跑
+        // （Manager.Update 第一行），延迟 ≤1 帧，PreWake 3 秒回看完全吸收。
         void OnPhraseRecognized(PhraseRecognizedEventArgs args)
+        {
+            var text = args.text;
+            var conf = args.confidence;
+            MainThreadDispatcher.Post(() => OnWakeFromMainThread(text, conf));
+        }
+
+        void OnWakeFromMainThread(string text, ConfidenceLevel conf)
         {
             if (this == null || !enabled) return;
             if (asrInFlight || buffer == null) return;
             buffer.NotifyWake();
-            if (debugLog) Debug.Log($"[Voice] 唤醒: {args.text} ({args.confidence})");
+            if (debugLog) Debug.Log($"[Voice] 唤醒: {text} ({conf})");
         }
 #endif
 
         bool IsPerforming()
         {
-            return (speech != null && (speech.IsSpeaking || speech.QueueCount > 0)) ||
-                   (song != null && song.IsPlaying);
+            if (speech != null && (speech.IsSpeaking || speech.QueueCount > 0)) return true;
+            if (song != null && song.IsPlaying) return true;
+            // MMD 舞包的点歌/点舞/礼物舞用 AvatarDanceHandler 自己的 AudioSource 放原曲，
+            // 不经 SongService——漏了它，MMD 表演期间监听不暂停，歌声会进识别
+            if (mmdDance == null && Time.unscaledTime >= mmdNextFind)
+            {
+                mmdDance = FindFirstObjectByType<CustomDancePlayer.AvatarDanceHandler>();
+                mmdNextFind = Time.unscaledTime + 5f;   // 场景里没有时限频重找，别每帧扫
+            }
+            return mmdDance != null && mmdDance.audioSource != null && mmdDance.audioSource.isPlaying;
         }
 
         void Update()

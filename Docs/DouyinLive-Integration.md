@@ -94,6 +94,7 @@
 "douyinVoiceCommandWindow": 8.0,   // 唤醒后最长录音秒数
 "douyinVoiceSilenceSeconds": 1.2,  // 静音多久算说完
 "douyinVoicePauseWhilePerforming": true,
+"douyinVoiceKeywordWake": true,    // false=强制音量检测模式（与本地识别器抢设备时的逃生门）
 "douyinVoiceNickname": "主播",
 
 // Cloud AI（OpenAI 兼容；key 明文存储）
@@ -193,3 +194,4 @@ DouyinLiveClient → DouyinLiveManager.Route()
 5. F9 切游戏陪播后再试 2/3 → 命令照常执行、闲聊走 AI（不被念出来）
 6. 不说话/放游戏声 → 无动作（开 debugLog 看无 ASR 请求）
 7. 连续说话 15 秒以上再唤醒 → 仍能识别完整命令（环形缓冲跨环绕点）
+8. 开 debugLog 喊一次唤醒词 → 日志出现 `[Voice] 唤醒:` 且无 UnityException（有异常说明唤醒回调线程有问题，截图反馈）

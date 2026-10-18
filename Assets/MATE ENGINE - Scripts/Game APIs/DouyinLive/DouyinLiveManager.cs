@@ -217,12 +217,20 @@ namespace DouyinLive
             asrProvider.Model = string.IsNullOrWhiteSpace(d.douyinVoiceAsrModel) ? "FunAudioLLM/SenseVoiceSmall" : d.douyinVoiceAsrModel;
             asrProvider.debugLog = debugLog;
 
-            if (voiceListener == null) voiceListener = gameObject.AddComponent<VoiceCommandListener>();
+            if (voiceListener == null)
+            {
+                voiceListener = gameObject.AddComponent<VoiceCommandListener>();
+                // AddComponent 会同步跑 OnEnable→StartMic：先按死再 Configure，
+                // 别让关着的功能用默认参数开一次真麦克风
+                voiceListener.enabled = false;
+            }
             voiceListener.Configure(speech, songService, this, asrProvider,
                 d.douyinVoiceWakeWords, d.douyinVoiceCommandWindow, d.douyinVoiceSilenceSeconds,
-                d.douyinVoicePauseWhilePerforming, debugLog);
+                d.douyinVoicePauseWhilePerforming, d.douyinVoiceKeywordWake, debugLog);
             bool wantVoice = d.enableDouyinLive && d.douyinVoiceEnabled;
             voiceListener.enabled = wantVoice && asrProvider.IsAvailable;
+            if (wantVoice && !asrProvider.IsAvailable)
+                Debug.LogWarning("[DouyinLive] 语音助手开关已开但 ASR 未配置（douyinVoiceAsrBaseUrl/ApiKey 或 aiBaseUrl/aiApiKey 为空），不启动");
 
             // 连接
             bool shouldRun = d.enableDouyinLive;
