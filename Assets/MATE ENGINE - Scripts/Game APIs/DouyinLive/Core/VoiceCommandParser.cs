@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 
 namespace DouyinLive
 {
@@ -16,6 +17,9 @@ namespace DouyinLive
 
         public static string ExtractCommand(string text, IReadOnlyList<string> wakeWords, bool requireWakeWord)
         {
+            // SenseVoice 会在句尾附情绪表情（「等会儿有抽奖哦。😊」）：不剥的话传话会原样
+            // 播出去、触发规则也可能因为多一个字符匹配不上。先剥表情再判空。
+            text = StripEmoji(text);
             if (string.IsNullOrWhiteSpace(text)) return null;
             if (wakeWords == null) wakeWords = Array.Empty<string>();
 
@@ -29,6 +33,31 @@ namespace DouyinLive
             for (int n = 0; n < 4 && TryMatchAtStart(cur, wakeWords, out end); n++)
                 cur = cur.Substring(end).Trim(TrimChars);
             return cur;
+        }
+
+        // 只剥表情相关的码位，中文（含扩展区生僻字）和全角标点一律保留：
+        // 辅助平面只认 1F000–1FAFF 表情块，BMP 只认杂项符号/装饰符号/箭头补充，
+        // 外加组合表情的变体选择符、零宽连接符和键帽符。
+        public static string StripEmoji(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            var sb = new StringBuilder(s.Length);
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (char.IsHighSurrogate(c) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1]))
+                {
+                    int cp = char.ConvertToUtf32(c, s[i + 1]);
+                    if (cp < 0x1F000 || cp > 0x1FAFF) sb.Append(c).Append(s[i + 1]);
+                    i++;
+                    continue;
+                }
+                if ((c >= 0x2600 && c <= 0x27BF) || (c >= 0x2B00 && c <= 0x2BFF) ||
+                    c == 0xFE0F || c == 0xFE0E || c == 0x200D || c == 0x20E3)
+                    continue;
+                sb.Append(c);
+            }
+            return sb.ToString();
         }
 
         // 全句找最早的唤醒词；同一位置有多个命中取最长的

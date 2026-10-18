@@ -85,6 +85,33 @@ namespace DouyinLive.Tests
             Assert.AreEqual("", VoiceCommandParser.ExtractCommand("小美小美", Wake, true));
         }
 
+        // ---------- 表情过滤（SenseVoice 会在句尾加情绪表情） ----------
+
+        [Test]
+        public void 句尾表情被剥掉()
+        {
+            Assert.AreEqual("等会儿有抽奖哦", VoiceCommandParser.ExtractCommand("小美小美，等会儿有抽奖哦。😊", Wake, false));
+        }
+
+        [Test]
+        public void 句中表情和变体选择符被剥掉()
+        {
+            // ❤️ = U+2764 + U+FE0F，两个都得剥
+            Assert.AreEqual("八点下播", VoiceCommandParser.ExtractCommand("小美八点❤️下播", Wake, false));
+        }
+
+        [Test]
+        public void 只有表情返回null()
+        {
+            Assert.IsNull(VoiceCommandParser.ExtractCommand("😊", Wake, false));
+        }
+
+        [Test]
+        public void 中文和全角标点不受表情过滤影响()
+        {
+            Assert.AreEqual("唱一首《黄昏》吧～", VoiceCommandParser.ExtractCommand("小美小美，唱一首《黄昏》吧～", Wake, false));
+        }
+
         // ---------- 输入防御 ----------
 
         [Test]

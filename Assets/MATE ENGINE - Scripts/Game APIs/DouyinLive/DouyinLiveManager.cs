@@ -54,6 +54,8 @@ namespace DouyinLive
         VoiceCommandListener voiceListener;
         readonly VoiceIntentRouter voiceIntents = new VoiceIntentRouter();
         bool voiceRelayEnabled;
+        bool voiceRelayAiFallback;
+        List<string> voiceRelayPrefixes = new List<string>();
 
         bool running;
 
@@ -187,6 +189,9 @@ namespace DouyinLive
             voiceIntents.Cloud = cloudBackend;
             voiceIntents.debugLog = debugLog;
             voiceRelayEnabled = d.douyinVoiceRelayEnabled;
+            voiceRelayAiFallback = d.douyinVoiceRelayAiFallback;
+            voiceRelayPrefixes = d.douyinVoiceRelayPrefixes != null
+                ? new List<string>(d.douyinVoiceRelayPrefixes) : new List<string>();
             if (triggerEffects != null) triggerEffects.debugLog = debugLog;
 
             // DanceDirector 由上面的 TriggerRouter.Awake 挂载创建，只有到这里才能保证它已存在；
@@ -404,11 +409,11 @@ namespace DouyinLive
         {
             if (reward.TryHandleDanmaku(ev)) return;
             // 语音不走「念弹幕」：主播自己的话被角色念回给主播没有意义，无论什么模式都走 AI 回复。
-            // 传话开关开着时先问分类器：是让角色对外播报（relay），还是在和角色聊天（chat）；
-            // 后端不可用/已在飞/超时一律当聊天，绝不让直播停下来等分类。
+            // 开头词传话已在 InjectVoiceChat 入口处理；这里是可选的大模型兜底（默认关）：
+            // 没说开头词的话再问一次分类器，后端不可用/已在飞/超时一律当聊天。
             if (ev.FromVoice)
             {
-                if (voiceRelayEnabled && voiceIntents.TryRoute(ev, OnVoiceRelay, OnVoiceChat)) return;
+                if (voiceRelayEnabled && voiceRelayAiFallback && voiceIntents.TryRoute(ev, OnVoiceRelay, OnVoiceChat)) return;
                 danmakuAI.OnDanmaku(ev);
                 return;
             }
@@ -440,6 +445,13 @@ namespace DouyinLive
         {
             if (string.IsNullOrWhiteSpace(text)) return;
             if (!running || IsBlocked()) return;
+            // 开头词传话（「告诉大家八点下播」）先于 Route()：主播明确说了要播报，
+            // 后半句里带「唱/歌」也不该先被当成点歌
+            if (voiceRelayEnabled && VoiceRelayParser.TryExtractRelay(text, voiceRelayPrefixes, out var relay))
+            {
+                OnVoiceRelay(relay);
+                return;
+            }
             var d = SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data : null;
             var ev = new DouyinEvent
             {

@@ -6,9 +6,11 @@ using UnityEngine;
 
 namespace DouyinLive
 {
-    // 语音传话路由：非命令语音（硬命令/触发规则/槽位/表演意图都已被前几层消费）
-    // 到这里二分——是让角色对外播报（relay），还是在和角色聊天（chat）。
+    // 语音传话的大模型兜底（douyinVoiceRelayAiFallback，默认关）：主播没说开头词时，
+    // 非命令语音（硬命令/触发规则/槽位/表演意图都已被前几层消费）到这里二分——
+    // 是让角色对外播报（relay），还是在和角色聊天（chat）。
     // chat/超时/失败一律回聊天路径，体面降级，绝不让直播停下来等分类。
+    // 主路径是 VoiceRelayParser 的开头词判定：实测中转站上一次分类 3~20 秒，1.5 秒内基本回不来。
     //
     // 与 IntentResolver 的两点差别：没有本地预筛（传话句不含表演关键词，预筛必漏）、
     // 没有单人冷却（传话是主播连续说话的合法用法，15 秒冷却会废掉它）。
@@ -21,11 +23,14 @@ namespace DouyinLive
         public const int MaxInFlight = 1;
         public const float TimeoutSeconds = 1.5f;
 
+        // 不能把 chat 定义成「让它做事」：「告诉大家八点下播」本身就是在让它做事，会全判成 chat。
+        // 改成「转述给观众 vs 跟角色本人说话」并给正反例，实测判对率明显提升。
         const string SystemPrompt =
-            "你是主播语音意图分类器。主播正在对桌面虚拟角色说话，判断这句话的目的：" +
-            "relay=让角色把这段话原样转达给直播间观众（公告/通知/交代事情），" +
-            "chat=在和角色对话、问它问题、或让它做事。" +
-            "只输出 JSON，不要任何解释：{\"intent\":\"relay|chat\"}";
+            "主播在直播中对虚拟角色说了一句话。判断：这句话是要让角色转述给观众听的内容（relay），" +
+            "还是主播在跟角色本人说话（chat）。" +
+            "relay 例子：等会儿有抽奖哦、告诉大家八点下播、欢迎新来的朋友、关注一下主播。" +
+            "chat 例子：今天唱什么好、你累不累、你觉得这首歌怎么样、跟我聊聊天。" +
+            "只输出 JSON：{\"intent\":\"relay\"} 或 {\"intent\":\"chat\"}";
 
         static readonly List<ChatMsg> EmptyHistory = new List<ChatMsg>();
 

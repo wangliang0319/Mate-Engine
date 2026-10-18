@@ -22,7 +22,7 @@
 | 竖屏直播窗口 | 配置自动 | `douyinPortraitAspect > 0` 时窗口变竖屏、角色居中，适配竖屏直播采集 |
 | 快捷反应 | 666/哈哈/你好/晚安等 | 预制回复秒回，不走 LLM |
 | 语音助手 | 麦克风说唤醒词 | 「小美小美 唱一首黄昏」→ 开口应答+唱跳；闲聊提问 AI 回答；唱歌/TTS 期间自动暂停监听；需 `douyinVoiceEnabled` |
-| 语音传话 | 唤醒后说公告 | 「小美小美 等会儿有抽奖哦」→ 原话播报给观众；说给角色的话照旧 AI 回复；需 `douyinVoiceRelayEnabled` |
+| 语音传话 | 唤醒后说「告诉大家…」 | 「小美小美 告诉大家八点下播」→ 原样播出「八点下播」；不带开头词的话照旧 AI 回复；开头词可配 `douyinVoiceRelayPrefixes` |
 | 观众记忆 | 自动 | 常客/大哥识别，专属欢迎；AI 回复带观众画像 |
 | 玩法菜单 | 弹幕 `菜单` | 口播可用玩法 |
 | 感谢榜+报时 | 自动 | 每30分钟播礼物Top3；整点报时 |
@@ -97,7 +97,9 @@
 "douyinVoicePauseWhilePerforming": true,
 "douyinVoiceKeywordWake": true,    // false=强制音量检测模式（与本地识别器抢设备时的逃生门）
 "douyinVoiceNickname": "主播",
-"douyinVoiceRelayEnabled": true,   // 传话意图：AI 分类非命令语音是播报还是聊天；false=回到纯聊天
+"douyinVoiceRelayEnabled": true,   // 传话总开关；false=语音一律走聊天
+"douyinVoiceRelayPrefixes": ["告诉大家", "跟大家说", "和大家说", "给大家说", "通知大家", "提醒大家", "转告大家"],
+"douyinVoiceRelayAiFallback": false,  // 没说开头词时问大模型是不是传话；需要很快的模型，默认关
 
 // Cloud AI（OpenAI 兼容；key 明文存储）
 "aiBaseUrl": "https://xxx/v1", "aiApiKey": "sk-...",
@@ -155,8 +157,9 @@ auto       自动模式(含随机点歌/点舞/大礼物)     q 退出
   （系统无中文语音包自动降级音量检测）后录到静音 1.2 秒，WAV 送云端 ASR，文本剥唤醒词
   后伪装成 `UserId="voice"` 的弹幕进 Route()——触发规则/追问槽位/LLM 意图/点歌换角色全部复用；
   非命令内容走 AI 闲聊回复（陪播模式也不念出来）。角色出声期间暂停监听防自触发。
-  非命令内容由 VoiceIntentRouter 花 ≤1.5 秒做一次 LLM 分类：relay=传话（原话进播报队列，
-  不过 AI 人设/敏感词通路），chat/超时/失败=走 AI 回复；关 `douyinVoiceRelayEnabled` 回到纯聊天。
+  句首带开头词（「告诉大家…」）的话在进 Route() 之前就判为传话：剥掉开头词、原话进播报队列
+  （不过 AI 人设/敏感词通路，后半句带「唱/歌」也不会被当成点歌）；其余照常走命令/聊天。
+  可选的大模型兜底（VoiceIntentRouter，≤1.5 秒）默认关。
 
 ### 触发层（2026-08 新增）
 
@@ -188,10 +191,10 @@ DouyinLiveClient → DouyinLiveManager.Route()
 - 语音助手：ASR 同音字转错歌名等同观众打错字，属正常容错；VAD 降级模式下直播外放声也会被
   送识别（有防自触发暂停兜底，口误提到唤醒词仍可能误触发）；唤醒词嵌在句子中间会被整段剥掉
   （正常唤醒词在句首，不踩）。
-- 语音传话：传话/聊天由 LLM 一次分类判定（≤1.5 秒），偶有误判——想说给角色的话被播了出去、
-  想说给观众的话被她接了嘴，换个说法即可。句里带「唱/歌/舞/换」等表演词会先过表演判定
-  再走传话分类，两次 LLM 串行最坏多等 ~3 秒。传话是主播原话直出（ASR 转出什么播什么，
-  含口语停顿和重复），不过 AI 人设与敏感词通路。
+- 语音传话：只认句首开头词，「我想告诉大家…」不算（那是在跟角色说话）；开头词后面的话原样直出
+  （ASR 转出什么播什么，含口语停顿和重复，表情符号会被剥掉），不过 AI 人设与敏感词通路。
+  大模型兜底 `douyinVoiceRelayAiFallback` 默认关：实测中转站上一次分类 3~20 秒，1.5 秒内基本回不来，
+  只有换成响应很快的模型才有意义；它还会偶有误判（想说给角色的话被播出去，或反过来）。
 - ASR 转写接口按模型收费开通：`douyinVoiceAsrBaseUrl` 留空复用 `aiBaseUrl`，但多数 LLM 中转站
   没有转写模型通道（症状：debugLog 里 `[VoiceASR] HTTP 503 ... model_not_found`，语音永远
   「ASR 无结果」）。把 `douyinVoiceAsrBaseUrl/ApiKey` 指到有转写接口的服务商即可（SiliconFlow
@@ -199,9 +202,11 @@ DouyinLiveClient → DouyinLiveManager.Route()
 
 ## 语音助手自测步骤（需真机麦克风）
 
-> 调试开关：Unity Editor 里 DouyinLiveManager 组件 Inspector 的 **Debug Log** 勾选项。
-> 开启后 Console/日志能看到 `[Voice]`（唤醒/转写）、`[VoiceIntentRouter]`（传话分类）、
+> 调试开关：Unity Editor 里 DouyinLiveManager 组件（挂在场景的 `Settings` 对象上）Inspector 的
+> **Debug Log** 勾选项。开启后 Console/日志能看到 `[Voice]`（唤醒/命令）、`[VoiceASR]`（转写）、
 > `[DouyinLive]`（传话播出）三组关键日志，下面的预期日志都以它为准。
+> 改代码前先停 Play：Play 中途热重载会清空单例，满屏 AvatarBigScreenTimer/Blink 报错
+> （建议 Preferences → General → Script Changes While Playing 设为 Recompile After Finished Playing）。
 
 1. settings.json 开 `douyinVoiceEnabled`，确认 ASR 配置可用（复用 AI 的 key 时 aiBaseUrl 服务商必须有转写接口）
 2. 说「小美小美 唱一首黄昏」→ 她开口应答并开唱+跟舞
@@ -211,10 +216,8 @@ DouyinLiveClient → DouyinLiveManager.Route()
 6. 不说话/放游戏声 → 无动作（开 debugLog 看无 ASR 请求）
 7. 连续说话 15 秒以上再唤醒 → 仍能识别完整命令（环形缓冲跨环绕点）
 8. 开 debugLog 喊一次唤醒词 → 日志出现 `[Voice] 唤醒:` 且无 UnityException（有异常说明唤醒回调线程有问题，截图反馈）
-9. 说「小美小美 等会儿有抽奖哦」→ 她原样播出这句话（不续唠）；隔 3 秒再说一条 → 两条都播出（无冷却）。
-   预期日志：`[VoiceIntentRouter] 「等会儿有抽奖哦」→ 传话` → `[DouyinLive] 传话播出: 等会儿有抽奖哦`
-10. 说「小美小美 今天唱什么好」→ AI 对话回复（不是播出你的问题）。预期日志：该句 → 聊天
-11. settings.json 设 `douyinVoiceRelayEnabled=false`（重启生效）→ 第 9 条变成 AI 对话回复（回到纯聊天，
-    且无 `[VoiceIntentRouter]` 日志）。改回 true 再重启可恢复
-12. （可选）句中带表演词的传话，如「小美小美 唱完这首告诉大家有抽奖哦」→ 先过表演判定
-    （判不是点歌）再走传话分类，最终原样播出；唤醒到播出最坏 ~3 秒属正常
+9. 一口气说「小美小美 告诉大家八点下播」→ 她立刻原样播出「八点下播」（不续唠）；隔 3 秒再说一条 → 两条都播出。
+   预期日志：`[Voice] 命令: 告诉大家八点下播` → `[DouyinLive] 传话播出: 八点下播`
+10. 说「小美小美 今天唱什么好」→ AI 对话回复（不是播出你的问题），且没有「传话播出」日志
+11. 说「小美小美 告诉大家唱完这首有抽奖」→ 原样播出「唱完这首有抽奖」，不会被当成点歌
+12. settings.json 设 `douyinVoiceRelayEnabled=false`（重启生效）→ 第 9 条变成 AI 对话回复。改回 true 再重启可恢复

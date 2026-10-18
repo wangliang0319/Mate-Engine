@@ -240,7 +240,14 @@ public class SaveLoadHandler : MonoBehaviour
         public bool douyinVoicePauseWhilePerforming = true; // 角色出声时暂停监听，防自触发
         public bool douyinVoiceKeywordWake = true;          // false=强制音量检测模式（与本地识别器抢设备时的逃生门）
         public string douyinVoiceNickname = "主播";          // 语音事件在观众记忆/上下文里的名字
-        public bool douyinVoiceRelayEnabled = true;          // 传话意图：AI 分类非命令语音是播报给观众还是聊天；false=回到纯聊天
+        public bool douyinVoiceRelayEnabled = true;          // 传话总开关：false=语音一律走聊天
+        // 传话开头词：「小美小美 告诉大家八点下播」→ 原样播出「八点下播」。只认句首，同时命中取最长
+        public List<string> douyinVoiceRelayPrefixes = new()
+        {
+            "告诉大家", "跟大家说", "和大家说", "给大家说", "通知大家", "提醒大家", "转告大家"
+        };
+        // 没说开头词时再问大模型是不是传话（≤1.5 秒）。需要响应很快的模型，中转站上多半超时，默认关
+        public bool douyinVoiceRelayAiFallback = false;
 
         // Cloud AI (OpenAI 兼容)
         public string aiBaseUrl = "";
