@@ -95,6 +95,7 @@ namespace DouyinLive
         Coroutine speakRoutine;
         bool hold;              // 主播说话期间暂停出队（队列保留）
         long backlogSeq = -1;   // >=0 时：序号不大于它的（会话前积压的）继续压着，只放行新入队的
+        bool muteLow;           // 安静状态：欢迎/点赞答谢/报时等低优先级播报不开口（服务照常记账）
         bool lingering;         // 说完后气泡停留阶段
         AudioClip ownedClip;    // 当前正在播、归本管线所有的 TTS 片段（被打断时要销毁）
 
@@ -270,6 +271,7 @@ namespace DouyinLive
         {
             lock (pending)
             {
+                if (muteLow && IsLowPriority(item.Prio)) return;
                 // 同优先级欢迎/点赞类只保留最新，避免积压
                 if (item.Prio == Priority.Welcome || item.Prio == Priority.LikeThanks)
                     pending.RemoveAll(p => p.Prio == item.Prio);
@@ -296,6 +298,18 @@ namespace DouyinLive
         {
             lock (pending) backlogSeq = seqCounter;
             hold = false;
+        }
+
+        static bool IsLowPriority(Priority p) =>
+            p == Priority.Welcome || p == Priority.LikeThanks || p == Priority.Milestone;
+
+        // 安静状态：丢弃新入队的低优先级条目，开启时顺带清掉已排队的。
+        // 欢迎/点赞/报时服务照常运行（来访记录、点赞计数都在里面），只是不开口——
+        // 欢迎服务的「记录来访」和「说欢迎词」绑在一起，从服务侧关会丢记录。
+        public void SetLowPriorityMute(bool on)
+        {
+            muteLow = on;
+            if (on) lock (pending) pending.RemoveAll(p => IsLowPriority(p.Prio));
         }
 
         // 打断当前这一条（连同它剩下的句子），队列保留。主播唤醒时调用。

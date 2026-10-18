@@ -388,6 +388,12 @@ namespace DouyinLive
             return s.Trim();
         }
 
+        // 安静/清空弹幕：丢掉排队待回复的弹幕，对话历史和观众上下文保留（ResetSession 会连这些一起清）
+        public void ClearPending()
+        {
+            lock (queue) queue.Clear();
+        }
+
         public void ResetSession()
         {
             lock (queue) queue.Clear();

@@ -72,6 +72,14 @@ namespace DouyinLive
         // 正在跳（或连播还没跳完）。冷场自动跳舞用它避免在舞跳到一半时又起一支。
         public bool Busy => (Dance != null && Dance.IsPlaying) || ChainPending;
 
+        // 主播说「别跳了」：先清连跳计数（否则 Update 里看到这支停了会接着跳下一支），再停当前这支
+        public void StopAll()
+        {
+            chainRemaining = 0;
+            var d = Dance;
+            if (d != null && d.IsPlaying) d.StopPlay();
+        }
+
         void Update()
         {
             var d = Dance;

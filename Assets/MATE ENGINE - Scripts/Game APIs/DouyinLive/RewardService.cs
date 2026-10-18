@@ -197,6 +197,17 @@ namespace DouyinLive
             vrmLoader.LoadVRM(paths[idx]);
         }
 
+        // 安静状态：只说答谢语，不跳舞、不走礼物规则。大礼物那几句台词说要跳舞，
+        // 安静时说出来自相矛盾，所以大礼物也用中档的答谢语。
+        public void ThankOnly(DouyinEvent ev)
+        {
+            if (!Enabled || ev.Type != DouyinMsgType.Gift) return;
+            string name = string.IsNullOrEmpty(ev.Nickname) ? "朋友" : ev.Nickname;
+            int totalValue = Mathf.Max(1, ev.DiamondCount) * Mathf.Max(1, ev.GiftCount);
+            if (totalValue >= 10) CelebrateMedium(name, ev);
+            else CelebrateSmall(name, ev);
+        }
+
         public void OnGift(DouyinEvent ev)
         {
             if (!Enabled || ev.Type != DouyinMsgType.Gift) return;
