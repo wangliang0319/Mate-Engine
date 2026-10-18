@@ -3,6 +3,7 @@
     "rootNamespace": "DouyinLive.Tests",
     "references": [
         "MateEngine.DouyinLive.Core",
+        "MateEngine.DouyinLive.Sherpa",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
@@ -10,7 +11,7 @@
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": true,
-    "precompiledReferences": ["nunit.framework.dll"],
+    "precompiledReferences": ["nunit.framework.dll", "sherpa-onnx.dll"],
     "autoReferenced": false,
     "defineConstraints": ["UNITY_INCLUDE_TESTS"],
     "versionDefines": [],

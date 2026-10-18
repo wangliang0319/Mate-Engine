@@ -1,0 +1,14 @@
+{
+    "name": "MateEngine.DouyinLive.Sherpa",
+    "rootNamespace": "DouyinLive",
+    "references": ["MateEngine.DouyinLive.Core"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": ["sherpa-onnx.dll"],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}
