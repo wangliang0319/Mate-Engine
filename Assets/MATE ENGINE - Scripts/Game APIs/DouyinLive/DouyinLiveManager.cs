@@ -357,7 +357,7 @@ namespace DouyinLive
                 AutoDance = d.douyinIdleAutoDanceEnabled
             });
             // danmakuAI.Enabled 不随场景/安静变：主播和她聊天也走它，安静时观众弹幕在 Route 里拦
-            danmakuAI.VerboseChat = behavior.Danmaku == DanmakuHandling.AiVerbose;
+            danmakuAI.VerboseChat = behavior.VerboseChat;
             idleChatter.Enabled = behavior.IdleChatter;
             idleChatter.IdleThreshold = behavior.IdleThreshold;
             idleChatter.AutoSongEnabled = behavior.AutoSong;
@@ -408,7 +408,8 @@ namespace DouyinLive
             {
                 quiet = true;
                 reader.ResetSession();       // 排队待念的弹幕作废
-                danmakuAI.ClearPending();    // 排队待回复的弹幕作废（对话历史保留）
+                danmakuAI.ClearPending();    // 排队/生成中的观众回复作废（对话历史保留）
+                triggers?.ClearActionQueue();   // 排队的大礼物舞、换角色等 L3 效果作废
                 ApplyBehavior();             // 关暖场/自动唱跳，开低优先级静音（顺带清掉已排队的欢迎/答谢）
             }
             Say($"好，我先安静{quietMinutes:0.#}分钟～");
@@ -420,6 +421,8 @@ namespace DouyinLive
             if (!quiet) return;
             quiet = false;
             ApplyBehavior();
+            // 安静期间没人互动时冷场计时一直在涨，不重置的话「我回来啦」后紧接着就开始暖场/自动唱歌
+            idleChatter.NotifyInteraction();
             if (announce) Say("我回来啦～");
             if (debugLog) Debug.Log("[DouyinLive] 退出安静");
         }
@@ -427,6 +430,8 @@ namespace DouyinLive
         void StopPerformance()
         {
             bool stopped = false;
+            // 先清排队的 L3：否则当前这支一停，排在后面的大礼物舞/点舞会在同一帧接着上
+            triggers?.ClearActionQueue();
             if (songService != null && songService.IsPlaying) { songService.StopSong(); stopped = true; }
             var director = GetComponent<DanceDirector>();
             if (director != null && director.Busy) { director.StopAll(); stopped = true; }
@@ -611,6 +616,7 @@ namespace DouyinLive
         {
             // 停播前发起的判定回来时直播已经结束了，这条回调也绕过了 IsBlocked()
             if (!running) return;
+            if (QuietDrops(ev)) return;
             if (triggers != null && triggers.TryHandleIntent(ev, kind, arg)) return;
             // 规则不存在或被限流拦下：「我想听首歌」本身是很好的闲聊素材，
             // 让 AI 回一句是体面的降级
@@ -622,8 +628,12 @@ namespace DouyinLive
         void OnIntentGaveUp(DouyinEvent ev)
         {
             if (!running) return;
+            if (QuietDrops(ev)) return;
             HandleChatLegacy(ev);
         }
+
+        // 安静前发起、安静后才回来的异步回调（意图判定、聊天动作标记）：观众的作废，主播的照常
+        bool QuietDrops(DouyinEvent ev) => !behavior.RespondToAudience && !ev.FromVoice;
 
         // 聊天模型的动作标记（【唱歌:晴天】）。模型承诺要表演时话已经念出去了，
         // 这里把动作补上——经 TryHandleIntent 走和意图判定同一条路：四道限流闸、
@@ -632,6 +642,7 @@ namespace DouyinLive
         void OnChatActionMarker(DouyinEvent ev, IntentKind kind, string arg)
         {
             if (!running) return;
+            if (QuietDrops(ev)) return;
             if (debugLog) Debug.Log($"[DouyinLive] 聊天动作标记: {kind} / {arg}");
             triggers?.TryHandleIntent(ev, kind, arg);
         }

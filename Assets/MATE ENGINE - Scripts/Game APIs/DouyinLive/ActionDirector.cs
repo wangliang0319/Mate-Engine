@@ -178,5 +178,6 @@ namespace DouyinLive
         };
 
         public void ResetSession() => Arbiter.Reset();
+        public void ClearQueue() => Arbiter.ClearQueue();
     }
 }

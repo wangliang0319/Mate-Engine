@@ -40,13 +40,15 @@ namespace DouyinLive
         {
             public string User; public string UserId; public string Text;
             public float At; public bool FromGifter;
+            public bool FromVoice;   // 主播语音：安静/清空时在途的回复照常说完（只作废观众的）
             // 动作标记回调需要的最小事件（TryHandleIntent 读 UserId/Content）
             public DouyinEvent ToEvent() => new DouyinEvent
             {
                 UserId = UserId,
                 Nickname = User,
                 Content = Text,
-                Type = DouyinMsgType.Chat
+                Type = DouyinMsgType.Chat,
+                FromVoice = FromVoice
             };
         }
 
@@ -59,6 +61,7 @@ namespace DouyinLive
 
         float lastReplyAt = -999f;
         bool busy;
+        int generation;   // ClearPending 递增：在途的观众回复回来时代数变了就不开口、不触发动作
 
         static readonly Regex EmojiOnly = new Regex(@"^[\s\p{So}\p{Sk}\[\]【】]+$", RegexOptions.Compiled);
 
@@ -154,7 +157,8 @@ namespace DouyinLive
                     UserId = ev.UserId,
                     Text = text,
                     At = Time.unscaledTime,
-                    FromGifter = vip
+                    FromGifter = vip,
+                    FromVoice = ev.FromVoice
                 });
             }
         }
@@ -184,6 +188,9 @@ namespace DouyinLive
 
         async Task ReplyAsync(PendingDanmaku item)
         {
+            int gen = generation;
+            // 安静/清空弹幕发生在生成期间：观众这条作废（主播的照常）。回调都在主线程，读 generation 无竞争
+            bool Stale() => !item.FromVoice && gen != generation;
             try
             {
                 string userMsg = item.User + " 说：" + item.Text;
@@ -243,7 +250,9 @@ namespace DouyinLive
                         var s = new SpeechPipeline.SpeechStream();
                         stream = s;
                         MainThreadDispatcher.Post(() =>
-                            Speech.EnqueueStream(s, SpeechPipeline.Priority.AIReply, 45f));
+                        {
+                            if (!Stale()) Speech.EnqueueStream(s, SpeechPipeline.Priority.AIReply, 45f);
+                        });
                     }
                     stream.Append(clean);
                     emittedAny = true;
@@ -299,7 +308,7 @@ namespace DouyinLive
                     var ev0 = item.ToEvent();
                     var k = kind;
                     var a = markerArg;
-                    MainThreadDispatcher.Post(() => OnActionMarker?.Invoke(ev0, k, a));
+                    MainThreadDispatcher.Post(() => { if (!Stale()) OnActionMarker?.Invoke(ev0, k, a); });
                 }
                 fullReply = ActionMarker.Strip(fullReply);
                 if (string.IsNullOrEmpty(fullReply)) return;
@@ -388,9 +397,11 @@ namespace DouyinLive
             return s.Trim();
         }
 
-        // 安静/清空弹幕：丢掉排队待回复的弹幕，对话历史和观众上下文保留（ResetSession 会连这些一起清）
+        // 安静/清空弹幕：丢掉排队待回复的弹幕，并作废正在生成的观众回复；
+        // 对话历史和观众上下文保留（ResetSession 会连这些一起清）
         public void ClearPending()
         {
+            generation++;
             lock (queue) queue.Clear();
         }
 

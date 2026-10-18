@@ -93,6 +93,9 @@ namespace DouyinLive
             director.ResetSession();
         }
 
+        // 主播「别跳了」「安静一会儿」：只丢排队的 L3 效果，限流账和追问槽不动（ResetSession 会全清）
+        public void ClearActionQueue() => director.ClearQueue();
+
         // ---------- 热重载 ----------
 
         void StartWatching()

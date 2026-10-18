@@ -79,6 +79,10 @@ namespace DouyinLive
 
         public void NotifyL3Finished() => L3Busy = false;
 
+        // 主播说「别跳了」「安静一会儿」：丢掉排队的 L3。不动 L3Busy——当前这支停下后
+        // 由 ActionDirector 看到它不忙了再放，否则还在播的效果会被当成已结束
+        public void ClearQueue() => l3Queue.Clear();
+
         public void Reset()
         {
             l3Queue.Clear();

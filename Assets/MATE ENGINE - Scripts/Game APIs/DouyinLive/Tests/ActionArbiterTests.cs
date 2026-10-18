@@ -130,5 +130,18 @@ namespace DouyinLive.Tests
             arb.SingingNow = false;
             Assert.IsNotNull(arb.TryDequeueL3(g));
         }
+
+        [Test]
+        public void ClearQueue_丢弃排队的L3但不放开正在执行的忙位()
+        {
+            // 主播说「别跳了」「安静一会儿」：排队的大礼物舞/换角色不能在当前这支停下后接着上
+            Assert.AreEqual(ArbitrationResult.Execute, arb.Submit(Req("a", "L3"), g));
+            Assert.AreEqual(ArbitrationResult.Queued, arb.Submit(Req("b", "L3"), g));
+            arb.ClearQueue();
+            Assert.AreEqual(0, arb.QueuedCount);
+            Assert.IsTrue(arb.L3Busy);      // 当前这支还在播，忙位由 ActionDirector 看到它停了再放
+            arb.NotifyL3Finished();
+            Assert.IsNull(arb.TryDequeueL3(g));
+        }
     }
 }

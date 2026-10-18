@@ -33,6 +33,8 @@ namespace DouyinLive
         public bool AutoDance;
         public bool RespondToAudience;   // false = 观众侧只记账不响应（礼物只说答谢语）
         public bool MuteLowPriority;     // true = 欢迎/点赞答谢/报时等低优先级播报不开口
+        // AI 回复要不要详细（也用于回复主播）。只看场景不看安静：安静只针对观众，主播找她聊天回复不该变短
+        public bool VerboseChat;
     }
 
     // 场景规则集中在这里：以前散在 douyinChatMode、暖场、自动唱跳几个互不相干的开关里，
@@ -43,7 +45,7 @@ namespace DouyinLive
 
         public static LiveBehavior Resolve(LiveScene scene, bool quiet, LiveSwitches s)
         {
-            var b = new LiveBehavior { IdleThreshold = s.IdleThreshold };
+            var b = new LiveBehavior { IdleThreshold = s.IdleThreshold, VerboseChat = scene == LiveScene.Solo };
             if (quiet)
             {
                 // 安静：只保留礼物答谢与主播语音响应（后两者不经过这里）

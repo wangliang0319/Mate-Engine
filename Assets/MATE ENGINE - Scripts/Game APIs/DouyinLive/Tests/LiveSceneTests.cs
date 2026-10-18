@@ -145,5 +145,23 @@ namespace DouyinLive.Tests
             Assert.AreEqual(LiveScene.Solo, LiveSceneMigration.Resolve(5, 1, out bool oor));
             Assert.IsTrue(oor);
         }
+
+        // ---------- 回复主播的详略 ----------
+
+        [Test]
+        public void 安静_独播回复主播仍然详细()
+        {
+            // 安静只针对观众：主播和她聊天的回复长度不该因为安静变短
+            Assert.IsTrue(LiveSceneResolver.Resolve(LiveScene.Solo, true, AllOn()).VerboseChat);
+            Assert.IsTrue(LiveSceneResolver.Resolve(LiveScene.Solo, false, AllOn()).VerboseChat);
+        }
+
+        [Test]
+        public void 搭档与陪播_回复简短()
+        {
+            Assert.IsFalse(LiveSceneResolver.Resolve(LiveScene.Duo, false, AllOn()).VerboseChat);
+            Assert.IsFalse(LiveSceneResolver.Resolve(LiveScene.Game, false, AllOn()).VerboseChat);
+            Assert.IsFalse(LiveSceneResolver.Resolve(LiveScene.Duo, true, AllOn()).VerboseChat);
+        }
     }
 }
