@@ -44,7 +44,9 @@ namespace DouyinLive
                 req.Content = form;
 
                 using var resp = await http.SendAsync(req, ct);
-                var body = await resp.Content.ReadAsStringAsync();
+                // 代理/网关故障会给出 Content 为 null 的响应（实测系统代理 127.0.0.1:8827 偶发），
+                // 不判空会把真实错误糊成一句 Object reference not set
+                var body = resp.Content != null ? await resp.Content.ReadAsStringAsync() : "";
                 if (!resp.IsSuccessStatusCode)
                 {
                     if (debugLog) Debug.LogWarning($"[VoiceASR] HTTP {(int)resp.StatusCode}: {Truncate(body)}");

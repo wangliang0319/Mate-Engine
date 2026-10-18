@@ -192,6 +192,10 @@ DouyinLiveClient → DouyinLiveManager.Route()
   想说给观众的话被她接了嘴，换个说法即可。句里带「唱/歌/舞/换」等表演词会先过表演判定
   再走传话分类，两次 LLM 串行最坏多等 ~3 秒。传话是主播原话直出（ASR 转出什么播什么，
   含口语停顿和重复），不过 AI 人设与敏感词通路。
+- ASR 转写接口按模型收费开通：`douyinVoiceAsrBaseUrl` 留空复用 `aiBaseUrl`，但多数 LLM 中转站
+  没有转写模型通道（症状：debugLog 里 `[VoiceASR] HTTP 503 ... model_not_found`，语音永远
+  「ASR 无结果」）。把 `douyinVoiceAsrBaseUrl/ApiKey` 指到有转写接口的服务商即可（SiliconFlow
+  实测可用，模型保持 `FunAudioLLM/SenseVoiceSmall`）。
 
 ## 语音助手自测步骤（需真机麦克风）
 
