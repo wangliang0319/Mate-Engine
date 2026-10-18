@@ -240,6 +240,7 @@ public class SaveLoadHandler : MonoBehaviour
         public bool douyinVoicePauseWhilePerforming = true; // 角色出声时暂停监听，防自触发
         public bool douyinVoiceKeywordWake = true;          // false=强制音量检测模式（与本地识别器抢设备时的逃生门）
         public string douyinVoiceNickname = "主播";          // 语音事件在观众记忆/上下文里的名字
+        public bool douyinVoiceRelayEnabled = true;          // 传话意图：AI 分类非命令语音是播报给观众还是聊天；false=回到纯聊天
 
         // Cloud AI (OpenAI 兼容)
         public string aiBaseUrl = "";

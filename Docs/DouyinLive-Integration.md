@@ -22,6 +22,7 @@
 | 竖屏直播窗口 | 配置自动 | `douyinPortraitAspect > 0` 时窗口变竖屏、角色居中，适配竖屏直播采集 |
 | 快捷反应 | 666/哈哈/你好/晚安等 | 预制回复秒回，不走 LLM |
 | 语音助手 | 麦克风说唤醒词 | 「小美小美 唱一首黄昏」→ 开口应答+唱跳；闲聊提问 AI 回答；唱歌/TTS 期间自动暂停监听；需 `douyinVoiceEnabled` |
+| 语音传话 | 唤醒后说公告 | 「小美小美 等会儿有抽奖哦」→ 原话播报给观众；说给角色的话照旧 AI 回复；需 `douyinVoiceRelayEnabled` |
 | 观众记忆 | 自动 | 常客/大哥识别，专属欢迎；AI 回复带观众画像 |
 | 玩法菜单 | 弹幕 `菜单` | 口播可用玩法 |
 | 感谢榜+报时 | 自动 | 每30分钟播礼物Top3；整点报时 |
@@ -96,6 +97,7 @@
 "douyinVoicePauseWhilePerforming": true,
 "douyinVoiceKeywordWake": true,    // false=强制音量检测模式（与本地识别器抢设备时的逃生门）
 "douyinVoiceNickname": "主播",
+"douyinVoiceRelayEnabled": true,   // 传话意图：AI 分类非命令语音是播报还是聊天；false=回到纯聊天
 
 // Cloud AI（OpenAI 兼容；key 明文存储）
 "aiBaseUrl": "https://xxx/v1", "aiApiKey": "sk-...",
@@ -153,6 +155,8 @@ auto       自动模式(含随机点歌/点舞/大礼物)     q 退出
   （系统无中文语音包自动降级音量检测）后录到静音 1.2 秒，WAV 送云端 ASR，文本剥唤醒词
   后伪装成 `UserId="voice"` 的弹幕进 Route()——触发规则/追问槽位/LLM 意图/点歌换角色全部复用；
   非命令内容走 AI 闲聊回复（陪播模式也不念出来）。角色出声期间暂停监听防自触发。
+  非命令内容由 VoiceIntentRouter 花 ≤1.5 秒做一次 LLM 分类：relay=传话（原话进播报队列，
+  不过 AI 人设/敏感词通路），chat/超时/失败=走 AI 回复；关 `douyinVoiceRelayEnabled` 回到纯聊天。
 
 ### 触发层（2026-08 新增）
 
@@ -195,3 +199,6 @@ DouyinLiveClient → DouyinLiveManager.Route()
 6. 不说话/放游戏声 → 无动作（开 debugLog 看无 ASR 请求）
 7. 连续说话 15 秒以上再唤醒 → 仍能识别完整命令（环形缓冲跨环绕点）
 8. 开 debugLog 喊一次唤醒词 → 日志出现 `[Voice] 唤醒:` 且无 UnityException（有异常说明唤醒回调线程有问题，截图反馈）
+9. 说「小美小美 等会儿有抽奖哦」→ 她原样播出这句话（不续唠）；隔 3 秒再说一条 → 两条都播出（无冷却）
+10. 说「小美小美 今天唱什么好」→ AI 对话回复（不是播出你的问题）
+11. settings.json 设 `douyinVoiceRelayEnabled=false` → 第 9 条变成 AI 对话回复（回到纯聊天）

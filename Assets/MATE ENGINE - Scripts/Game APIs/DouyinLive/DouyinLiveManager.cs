@@ -52,6 +52,8 @@ namespace DouyinLive
         EdgeTTSProvider edgeTTS;
         CloudASRProvider asrProvider;
         VoiceCommandListener voiceListener;
+        readonly VoiceIntentRouter voiceIntents = new VoiceIntentRouter();
+        bool voiceRelayEnabled;
 
         bool running;
 
@@ -182,6 +184,9 @@ namespace DouyinLive
             triggers.debugLog = debugLog;
             intents.Cloud = cloudBackend;
             intents.debugLog = debugLog;
+            voiceIntents.Cloud = cloudBackend;
+            voiceIntents.debugLog = debugLog;
+            voiceRelayEnabled = d.douyinVoiceRelayEnabled;
             if (triggerEffects != null) triggerEffects.debugLog = debugLog;
 
             // DanceDirector 由上面的 TriggerRouter.Awake 挂载创建，只有到这里才能保证它已存在；
@@ -257,6 +262,7 @@ namespace DouyinLive
             idleChatter.ResetSession();
             if (triggers != null) triggers.ResetSession();
             intents.Reset();
+            voiceIntents.Reset();
             voiceListener?.ResetSession();
             if (debugLog) Debug.Log("[DouyinLive] Started, connecting " + url);
         }
@@ -271,6 +277,7 @@ namespace DouyinLive
             // MainThreadDispatcher，不受下面 Update 的 running 早退保护，所以这里
             // 要把在等的请求和追问槽位一起清掉，别让角色在停播后自己动起来。
             intents.Reset();
+            voiceIntents.Reset();   // 在途传话分类同上，停播后不动作
             voiceListener?.ResetSession();   // 丢弃在途转写，停播后语音不动作
             if (triggers != null) triggers.ResetSession();
         }
@@ -396,13 +403,33 @@ namespace DouyinLive
         void HandleChatLegacy(DouyinEvent ev)
         {
             if (reward.TryHandleDanmaku(ev)) return;
-            // 语音闲聊不走「念弹幕」：主播自己的话被角色念回给主播没有意义，
-            // 无论什么模式都走 AI 回复。
-            if (ev.FromVoice) { danmakuAI.OnDanmaku(ev); return; }
+            // 语音不走「念弹幕」：主播自己的话被角色念回给主播没有意义，无论什么模式都走 AI 回复。
+            // 传话开关开着时先问分类器：是让角色对外播报（relay），还是在和角色聊天（chat）；
+            // 后端不可用/已在飞/超时一律当聊天，绝不让直播停下来等分类。
+            if (ev.FromVoice)
+            {
+                if (voiceRelayEnabled && voiceIntents.TryRoute(ev, OnVoiceRelay, OnVoiceChat)) return;
+                danmakuAI.OnDanmaku(ev);
+                return;
+            }
             // 游戏陪播：AI 不掺和，带昵称念出来，主播听声人工回复。
             // 指令弹幕（触发规则/槽位/点歌等）在进到这里之前就已被消费。
             if (ChatMode == 1) reader.OnDanmaku(ev);
             else danmakuAI.OnDanmaku(ev);
+        }
+
+        // 传话/聊天回调：分类是 1.5 秒异步，停播后回来不能开口（同 OnIntentResolved 的 running 守卫）
+        void OnVoiceRelay(string text)
+        {
+            if (!running) return;
+            speech.Enqueue(text, SpeechPipeline.Priority.AIReply, 30f);
+            if (debugLog) Debug.Log("[DouyinLive] 传话播出: " + text);
+        }
+
+        void OnVoiceChat(DouyinEvent ev)
+        {
+            if (!running) return;
+            danmakuAI.OnDanmaku(ev);
         }
 
         // ---------- 语音助手：麦克风命令伪装成弹幕进同一条链路 ----------
