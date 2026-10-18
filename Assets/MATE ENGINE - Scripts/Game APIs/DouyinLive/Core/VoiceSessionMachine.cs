@@ -78,9 +78,13 @@ namespace DouyinLive
             {
                 case VoiceSessionState.WakePending:
                 case VoiceSessionState.Ack:
-                case VoiceSessionState.Listening:
                 case VoiceSessionState.Processing:
                     return output;   // 正在听/正在处理：重复的唤醒词不重置会话
+                case VoiceSessionState.Listening:
+                    // 追问录音里检出唤醒词：主播是在重新唤醒（喊完会停下等应答），按新唤醒走；
+                    // 否则转写只剩唤醒词，追问分支会把空命令静默丢掉，主播以为没唤醒
+                    if (!fromFollowUp) return output;
+                    break;
             }
             if (talking) output.Add(VoiceAction.InterruptSpeech);
             if (performing && !ducked) { output.Add(VoiceAction.DuckMusic); ducked = true; }

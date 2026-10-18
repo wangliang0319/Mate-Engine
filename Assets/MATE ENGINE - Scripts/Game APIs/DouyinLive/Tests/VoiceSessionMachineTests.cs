@@ -320,6 +320,22 @@ namespace DouyinLive.Tests
             Assert.Contains(VoiceAction.Inject, L(m.OnTranscript(9f, "那唱晴天吧")));
         }
 
+        [Test]
+        public void 追问录音中检出唤醒词_按新唤醒处理并应答()
+        {
+            // 她回答完 6 秒内主播又喊「小美小美」：开口先被追问接住进了聆听，唤醒词随后才检出。
+            // 以前这里当成重复唤醒忽略，主播喊完停下来等应答，录音转写出来只有唤醒词，
+            // 追问分支把空命令静默丢弃——没应答、没「没听清」，接着说的指令也没人听
+            var m = FollowUp();
+            Run(m, 7.02f, 7.4f, true);
+            Assert.AreEqual(VoiceSessionState.Listening, m.State);
+            var a = L(m.OnWake(7.6f, false, false));
+            Assert.Contains(VoiceAction.StartCapture, a);   // 从唤醒词处重新起录，丢掉追问录到的半截
+            Assert.AreEqual(VoiceSessionState.WakePending, m.State);
+            var b = Run(m, 7.62f, 8.2f, false);              // 喊完停下等她
+            Assert.Contains(VoiceAction.PlayAck, b);
+        }
+
         // ---------- 重复唤醒 / 中止 ----------
 
         [Test]
