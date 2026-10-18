@@ -93,6 +93,9 @@ namespace DouyinLive
         long seqCounter;
         bool speaking;
         Coroutine speakRoutine;
+        bool hold;              // 主播说话期间暂停出队（队列保留）
+        bool lingering;         // 说完后气泡停留阶段
+        AudioClip ownedClip;    // 当前正在播、归本管线所有的 TTS 片段（被打断时要销毁）
 
         LLMUnitySamples.Bubble activeBubble;
         Animator avatarAnimator;
@@ -105,6 +108,10 @@ namespace DouyinLive
         public bool IsSpeaking => speaking;
         public int QueueCount { get { lock (pending) return pending.Count; } }
 
+        // 只在真正出声（含句间等待合成）时为 true；说完后气泡停留阶段为 false。
+        // 语音会话判断「她说完了」用这个：IsSpeaking 要多等 bubbleLinger 秒，追问窗口会晚开 3 秒。
+        public bool IsTalking => speaking && !lingering;
+
         void Update()
         {
             RefreshAvatarRefs();
@@ -112,7 +119,7 @@ namespace DouyinLive
             DriveEmotion();
             FollowHead();
 
-            if (!speaking)
+            if (!speaking && !hold)
             {
                 var item = DequeueBest();
                 if (item != null)
@@ -274,6 +281,56 @@ namespace DouyinLive
             lock (pending) pending.Clear();
         }
 
+        // 主播说话期间暂停出队：队列保留，TTL 照常过期（过期的欢迎、点赞感谢该丢就丢）
+        public void SetHold(bool on)
+        {
+            hold = on;
+        }
+
+        // 打断当前这一条（连同它剩下的句子），队列保留。主播唤醒时调用。
+        public void InterruptCurrent()
+        {
+            if (speakRoutine != null) { StopCoroutine(speakRoutine); speakRoutine = null; }
+            if (voiceSource != null && voiceSource.isPlaying) voiceSource.Stop();
+            if (ownedClip != null) { Destroy(ownedClip); ownedClip = null; }
+            if (avatarAnimator != null) avatarAnimator.SetBool("isTalking", false);   // 不然会卡在张嘴
+            RemoveBubble();
+            speaking = false;
+            lingering = false;
+        }
+
+        // 立即播放预合成音频（语音应答）：打断当前句，不进队列、不受 SetHold 影响。
+        // clip 为空（TTS 没就绪）时只显示气泡。onFinished 在出声结束、气泡停留之前回调。
+        // clip 归调用方所有（缓存反复用），这里绝不销毁。
+        public void PlayImmediate(string text, AudioClip clip, Action onFinished)
+        {
+            InterruptCurrent();
+            speakRoutine = StartCoroutine(ImmediateRoutine(text, clip, onFinished));
+        }
+
+        IEnumerator ImmediateRoutine(string text, AudioClip clip, Action onFinished)
+        {
+            speaking = true;
+            lingering = false;
+            ShowBubble(text);
+            if (clip != null && voiceSource != null)
+            {
+                voiceSource.clip = clip;
+                voiceSource.volume = volume;
+                voiceSource.Play();
+                if (avatarAnimator != null) avatarAnimator.SetBool("isTalking", true);
+                while (voiceSource != null && voiceSource.isPlaying) yield return null;
+                if (avatarAnimator != null) avatarAnimator.SetBool("isTalking", false);
+            }
+            lingering = true;
+            onFinished?.Invoke();
+            yield return new WaitForSeconds(bubbleLinger);
+            RemoveBubble();
+            speaking = false;
+            lingering = false;
+            speakRoutine = null;
+        }
+
         SpeechItem DequeueBest()
         {
             lock (pending)
@@ -295,6 +352,7 @@ namespace DouyinLive
         IEnumerator SpeakRoutine(SpeechItem item)
         {
             speaking = true;
+            lingering = false;
             var stream = item.Stream;
             var provider = PickProvider();
             bool useTTS = provider != null && TTSEnabled;
@@ -355,6 +413,7 @@ namespace DouyinLive
                 {
                     var clip = AudioClip.Create("tts", pcm.Samples.Length / pcm.Channels, pcm.Channels, pcm.SampleRate, false);
                     clip.SetData(pcm.Samples, 0);
+                    ownedClip = clip;
                     voiceSource.clip = clip;
                     voiceSource.volume = volume;
                     voiceSource.Play();
@@ -370,6 +429,7 @@ namespace DouyinLive
                         yield return null;
                     }
                     Destroy(clip);
+                    ownedClip = null;
                 }
                 else if (!useTTS)
                 {
@@ -383,9 +443,11 @@ namespace DouyinLive
             }
 
             if (avatarAnimator != null) avatarAnimator.SetBool("isTalking", false);
+            lingering = true;
             if (anyShown) yield return new WaitForSeconds(bubbleLinger);
             RemoveBubble();
             speaking = false;
+            lingering = false;
         }
 
         bool HasHigherPriorityWaiting(Priority current)

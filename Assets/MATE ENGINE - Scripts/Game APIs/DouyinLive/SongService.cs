@@ -40,6 +40,7 @@ namespace DouyinLive
         public float minSpeed = 0.75f, maxSpeed = 1.35f;
 
         public SpeechPipeline Speech;
+        float duckLevel = 1f;   // 语音会话期间的歌声比例，1=不压低
 
         Coroutine playRoutine;
         string nowPlaying;
@@ -62,6 +63,20 @@ namespace DouyinLive
                 return;
             }
             playRoutine = StartCoroutine(SearchAndPlay(keyword.Trim(), userName));
+        }
+
+        // 主播唤醒时把歌声压低（像手机助手压低音乐），会话结束恢复。
+        // 会话期间新歌开播也遵守当前压低状态（见 SearchAndPlay）。
+        public void Duck(float level)
+        {
+            duckLevel = Mathf.Clamp01(level);
+            if (musicSource != null) musicSource.volume = duckLevel;
+        }
+
+        public void Unduck()
+        {
+            duckLevel = 1f;
+            if (musicSource != null) musicSource.volume = 1f;
         }
 
         public void StopSong()
@@ -140,7 +155,7 @@ namespace DouyinLive
 
             if (musicSource == null) musicSource = gameObject.AddComponent<AudioSource>();
             musicSource.clip = clip;
-            musicSource.volume = 1f;   // 响度已在 PCM 上归一化，这里不再叠第二个音量系数
+            musicSource.volume = duckLevel;   // 响度已在 PCM 上归一化；只叠语音会话的压低比例（平时为 1）
             musicSource.loop = false;
             musicSource.Play();
 
