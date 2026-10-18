@@ -21,6 +21,7 @@
 | 情绪动作 | 说话内容关键词 | 谢谢/抱抱→开心表情+互动动画；难过/惊喜同理 |
 | 竖屏直播窗口 | 配置自动 | `douyinPortraitAspect > 0` 时窗口变竖屏、角色居中，适配竖屏直播采集 |
 | 快捷反应 | 666/哈哈/你好/晚安等 | 预制回复秒回，不走 LLM |
+| 语音助手 | 麦克风说唤醒词 | 「小美小美 唱一首黄昏」→ 开口应答+唱跳；闲聊提问 AI 回答；唱歌/TTS 期间自动暂停监听；需 `douyinVoiceEnabled` |
 | 观众记忆 | 自动 | 常客/大哥识别，专属欢迎；AI 回复带观众画像 |
 | 玩法菜单 | 弹幕 `菜单` | 口播可用玩法 |
 | 感谢榜+报时 | 自动 | 每30分钟播礼物Top3；整点报时 |
@@ -34,6 +35,7 @@
    - `SongService` 由 Manager 自动挂载，无需手动添加
 2. **设置页**（可选）：挂 `SettingsHandlerDouyinLive`，控件拖对应字段。
    未做 UI 时直接编辑 settings.json。
+3. **语音助手**（可选）：`VoiceCommandListener` 由 Manager 自动挂载，无需手动接线；需要麦克风权限。
 
 ### SpeechPipeline 关键 Inspector 参数
 
@@ -61,6 +63,8 @@
 - 启动 [DouyinBarrageGrab](https://github.com/ape-byte/DouyinBarrageGrab)（管理员），默认 `ws://127.0.0.1:8888`，
   再打开抖音直播伴侣或浏览器直播页。**注意：直播页要在抓取器启动之后打开**，否则抓不到流。
 - 无直播测试：关闭抓取器，运行 `python Tools/douyin_mock_server.py`（见下）。
+- 语音助手：「关键词唤醒」模式要求系统装了中文语音包，没有会自动降级为音量检测模式
+  （每句话都送云端识别，延迟多 ~1 秒）；ASR 模型名按服务商填（SiliconFlow `FunAudioLLM/SenseVoiceSmall`，OpenAI 官方 `whisper-1`）。
 
 ## settings.json 配置（`AppData/LocalLow/Shinymoon/MateEngineX/`）
 
@@ -80,6 +84,17 @@
 "douyinChatMode": 0,             // 0=AI聊天（详细回复） 1=游戏陪播（念弹幕），F9 直播中随时切
 "douyinReadInterval": 5.0,       // 念弹幕最小间隔秒数
 "douyinLivePrompt": "",              // 追加人设
+
+// 语音助手（麦克风控制角色）
+"douyinVoiceEnabled": false,
+"douyinVoiceWakeWords": ["小美小美", "小美"],   // 建议改成角色人设的名字
+"douyinVoiceAsrBaseUrl": "",       // 空 = 复用 aiBaseUrl
+"douyinVoiceAsrApiKey": "",        // 空 = 复用 aiApiKey
+"douyinVoiceAsrModel": "FunAudioLLM/SenseVoiceSmall",
+"douyinVoiceCommandWindow": 8.0,   // 唤醒后最长录音秒数
+"douyinVoiceSilenceSeconds": 1.2,  // 静音多久算说完
+"douyinVoicePauseWhilePerforming": true,
+"douyinVoiceNickname": "主播",
 
 // Cloud AI（OpenAI 兼容；key 明文存储）
 "aiBaseUrl": "https://xxx/v1", "aiApiKey": "sk-...",
@@ -133,6 +148,10 @@ auto       自动模式(含随机点歌/点舞/大礼物)     q 退出
 - **点歌打断**：拖拽角色 / 打开菜单 / MMD 自定义舞启动（点舞、礼物舞）→ 立即停唱停跳并还原设置。
 - **点歌优先级**：本地 MMD 同名舞包（真编舞）> 网易云在线（VIP 歌自动落到可播的翻唱版）。
 - **三级降级**：云 LLM→本地 LLMUnity→不回复；云 TTS→(EdgeTTS 已失效)→纯气泡字幕。
+- **语音助手**：麦克风常开环形缓冲（回看 3 秒），本地 KeywordRecognizer 命中唤醒词
+  （系统无中文语音包自动降级音量检测）后录到静音 1.2 秒，WAV 送云端 ASR，文本剥唤醒词
+  后伪装成 `UserId="voice"` 的弹幕进 Route()——触发规则/追问槽位/LLM 意图/点歌换角色全部复用；
+  非命令内容走 AI 闲聊回复（陪播模式也不念出来）。角色出声期间暂停监听防自触发。
 
 ### 触发层（2026-08 新增）
 
@@ -161,3 +180,16 @@ DouyinLiveClient → DouyinLiveManager.Route()
 - 内置舞步共 5 个动画片段；"点歌跟舞"是节奏对齐的舞步轮换，精确卡点编舞请用
   MMD 舞包（`StreamingAssets/CustomDances`），点歌会自动优先匹配同名舞包。
 - mp3 解码用 NAudio ACM（Windows 自带解码器），仅 Windows —— 与项目平台一致。
+- 语音助手：ASR 同音字转错歌名等同观众打错字，属正常容错；VAD 降级模式下直播外放声也会被
+  送识别（有防自触发暂停兜底，口误提到唤醒词仍可能误触发）；唤醒词嵌在句子中间会被整段剥掉
+  （正常唤醒词在句首，不踩）。
+
+## 语音助手自测步骤（需真机麦克风）
+
+1. settings.json 开 `douyinVoiceEnabled`，确认 ASR 配置可用（复用 AI 的 key 时 aiBaseUrl 服务商必须有转写接口）
+2. 说「小美小美 唱一首黄昏」→ 她开口应答并开唱+跟舞
+3. 说「小美小美 今天直播什么好」→ AI 开口聊
+4. 她正在说话/唱歌时喊唤醒词 → 不响应；说完恢复
+5. F9 切游戏陪播后再试 2/3 → 命令照常执行、闲聊走 AI（不被念出来）
+6. 不说话/放游戏声 → 无动作（开 debugLog 看无 ASR 请求）
+7. 连续说话 15 秒以上再唤醒 → 仍能识别完整命令（环形缓冲跨环绕点）
