@@ -96,6 +96,8 @@ namespace DouyinLive
                 case "song":   kind = IntentKind.Song; break;
                 case "dance":  kind = IntentKind.Dance; break;
                 case "avatar": kind = IntentKind.Avatar; break;
+                case "relay":  kind = IntentKind.Relay; break;
+                case "chat":   kind = IntentKind.None; break;   // 语音传话分类器的「聊天」：不是表演意图
                 case "none":   kind = IntentKind.None; break;
                 default: return false;
             }
@@ -103,6 +105,13 @@ namespace DouyinLive
             string a = ExtractValue(raw, "arg");
             arg = a == null ? "" : a.Trim();
             return true;
+        }
+
+        // 语音传话路由的判定：relay 算传话，其余（chat/none/越权输出/解析失败）一律回聊天路径。
+        // 放 Core 是为了能进 EditMode 测试——路由器本体在 Assembly-CSharp，测不了。
+        public static bool IsRelayVerdict(string raw)
+        {
+            return TryParseIntentJson(raw, out var kind, out _) && kind == IntentKind.Relay;
         }
 
         static string ExtractValue(string s, string key)

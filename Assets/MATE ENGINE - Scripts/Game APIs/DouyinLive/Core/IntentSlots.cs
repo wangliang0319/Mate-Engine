@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace DouyinLive
 {
-    public enum IntentKind { None, Song, Dance, Avatar }
+    public enum IntentKind { None, Song, Dance, Avatar, Relay }
 
     // 一次「角色问了、等观众答」的待补状态
     public class IntentSlot
