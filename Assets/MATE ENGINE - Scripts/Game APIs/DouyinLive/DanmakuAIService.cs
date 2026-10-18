@@ -29,9 +29,26 @@ namespace DouyinLive
         // 直播中可变（F9 切模式），SystemPrompt 每次请求都现读，这里做成活属性。
         public bool VerboseChat = true;
 
+        // 聊天模型在回复末尾标了【唱歌】【跳舞:赤伶】时回调（主线程）。
+        // 参数已由 ActionMarker 识别，是否可用（IsUsableArg/IsReservedArg）
+        // 由消费端裁决——这里只转发。
+        public Action<DouyinEvent, IntentKind, string> OnActionMarker;
+
         public int RepliedCount { get; private set; }
 
-        class PendingDanmaku { public string User; public string UserId; public string Text; public float At; public bool FromGifter; }
+        class PendingDanmaku
+        {
+            public string User; public string UserId; public string Text;
+            public float At; public bool FromGifter;
+            // 动作标记回调需要的最小事件（TryHandleIntent 读 UserId/Content）
+            public DouyinEvent ToEvent() => new DouyinEvent
+            {
+                UserId = UserId,
+                Nickname = User,
+                Content = Text,
+                Type = DouyinMsgType.Chat
+            };
+        }
 
         readonly List<PendingDanmaku> queue = new List<PendingDanmaku>();
         readonly List<ChatMsg> history = new List<ChatMsg>();
@@ -48,9 +65,19 @@ namespace DouyinLive
         string SystemPrompt =>
             (Persona != null ? Persona.ToPromptSection() : "你是一个桌面宠物虚拟主播。") +
             "你正在抖音直播，观众会发弹幕，你要活泼地回应。" +
+            // 通用问答：没有这句，模型会忠实地扮演「只会唱歌跳舞的小精灵」，
+            // 拿人设搪塞知识问题。先答题再主播腔，两者不冲突。
+            "你知识渊博：观众问任何问题（百科常识、天文地理、脑筋急转弯、数学、生活难题）" +
+            "都要先给出准确有用的答案，再用主播的口吻带一句俏皮话；" +
+            "不确定的问题就老实说不确定，不要瞎编。" +
             (VerboseChat
-                ? "规则：回复要充实，通常两到三句话；结尾自然地向观众抛一个问题，引导对方继续聊；"
-                : "规则：回复必须精简，一般一句话，最多不超过30个字；") +
+                ? "闲聊时回复要充实，通常两到三句话；结尾自然地向观众抛一个问题，引导对方继续聊；"
+                : "闲聊时回复必须精简，一般一句话，最多不超过30个字；") +
+            // 动作标记协议：让「会说话的大脑」能自己触发表演，接住「唱吧」这类
+            // 只有结合上下文才能懂的请求（IntentResolver 是冷判定，接不住）。
+            "你真的会唱歌、跳舞、换角色：观众想看你表演、或你顺着聊天答应了要表演时，" +
+            "在回复最末尾加一个标记——【唱歌】【跳舞】【换角色】，观众点了名字就带参数" +
+            "（如【唱歌:晴天】）；没有要表演就绝对不要加标记。" +
             "不要使用表情符号、颜文字、markdown或任何特殊符号；" +
             "适合直接朗读出来；直接说内容，不要加引号或前缀；不聊政治宗教等敏感话题。" +
             (string.IsNullOrEmpty(ExtraPersona) ? "" : ("补充设定：" + ExtraPersona));
@@ -60,6 +87,10 @@ namespace DouyinLive
         {
             (new Regex(@"^6+$|^666+", RegexOptions.Compiled), new[]
                 { "谢谢宝子的666，我会更努力的~", "666收到，你们也很棒！", "嘿嘿，谢谢夸奖~" }),
+            // 「扣个1让我看到你」的回应。必须放在 text.Length < 2 闸门之前检查：
+            // 单字弹幕会被那道闸丢掉，而「1」恰恰是 AI 自己和冷场暖场最爱发的邀请
+            (new Regex(@"^[1１]+$", RegexOptions.Compiled), new[]
+                { "看到啦看到啦，都在呢~", "1收到！你们陪我聊天我就超开心~", "哇这么多人应我，爱你们~" }),
             (new Regex(@"^哈+$|^(哈哈)+哈*$|^233+$", RegexOptions.Compiled), new[]
                 { "被你们笑得我也想笑了~", "开心就好呀哈哈~", "笑什么呢，带我一个~" }),
             (new Regex(@"^(主播|宝宝|小姐姐)?(你好|您好|hi|hello|哈喽|嗨)$", RegexOptions.Compiled | RegexOptions.IgnoreCase), new[]
@@ -82,10 +113,9 @@ namespace DouyinLive
         {
             if (!Enabled || ev.Type != DouyinMsgType.Chat) return;
             var text = (ev.Content ?? "").Trim();
-            if (text.Length < 2) return;
-            if (EmojiOnly.IsMatch(text)) return;
 
-            // 快捷反应：高频弹幕直接秒回（带20秒冷却防复读）
+            // 快捷反应：高频弹幕直接秒回（带20秒冷却防复读）。
+            // 放在长度/表情闸门之前：「1」这种单字回应正是快捷反应要接的东西
             foreach (var (pattern, replies) in QuickReplies)
             {
                 if (!pattern.IsMatch(text)) continue;
@@ -95,6 +125,9 @@ namespace DouyinLive
                     SpeechPipeline.Priority.AIReply, 20f);
                 return;
             }
+
+            if (text.Length < 2) return;
+            if (EmojiOnly.IsMatch(text)) return;
 
             // 敏感弹幕不接茬（不回复即不给节奏）
             if (!ContentFilter.IsSafe(text)) return;
@@ -196,7 +229,9 @@ namespace DouyinLive
 
                 void EmitOne(string raw)
                 {
-                    var clean = Sanitize(raw);
+                    // 动作标记不能被念出来：先剥再过敏感词。半截标记（流式切割的
+                    // 残片）也在这里被剪掉，正文在标记之前，不受影响
+                    var clean = ActionMarker.Strip(Sanitize(raw));
                     if (string.IsNullOrEmpty(clean)) return;
                     if (!ContentFilter.IsSafe(clean))
                     {
@@ -255,6 +290,19 @@ namespace DouyinLive
                 string fullReply = Sanitize(!string.IsNullOrEmpty(reply) ? reply : full.ToString(),
                     MaxFullReplyChars);
                 if (string.IsNullOrEmpty(fullReply) || !emittedAny) return;
+
+                // 动作标记：模型说「那我唱咯【唱歌:晴天】」时，话已经念出去了，
+                // 动作由回调补上。历史里存剥掉标记的干净文本——下一轮模型看到
+                // 「assistant: 那我唱咯」就会接着「唱完了」往下聊，而不是再标一次
+                if (ActionMarker.TryExtract(fullReply, out var kind, out var markerArg))
+                {
+                    var ev0 = item.ToEvent();
+                    var k = kind;
+                    var a = markerArg;
+                    MainThreadDispatcher.Post(() => OnActionMarker?.Invoke(ev0, k, a));
+                }
+                fullReply = ActionMarker.Strip(fullReply);
+                if (string.IsNullOrEmpty(fullReply)) return;
 
                 history.Add(new ChatMsg("user", userMsg));
                 history.Add(new ChatMsg("assistant", fullReply));

@@ -133,6 +133,7 @@ namespace DouyinLive
             danmakuAI.MinInterval = d.douyinAIReplyMinInterval;
             danmakuAI.ExtraPersona = d.douyinLivePrompt;
             danmakuAI.VerboseChat = d.douyinChatMode == 0;   // AI 聊天模式回复要详细并引导话题
+            danmakuAI.OnActionMarker = OnChatActionMarker;   // 聊天模型说「那我唱咯【唱歌:晴天】」
             ChatMode = d.douyinChatMode;
 
             reader.Speech = speech;
@@ -391,6 +392,17 @@ namespace DouyinLive
         {
             if (!running) return;
             HandleChatLegacy(ev);
+        }
+
+        // 聊天模型的动作标记（【唱歌:晴天】）。模型承诺要表演时话已经念出去了，
+        // 这里把动作补上——经 TryHandleIntent 走和意图判定同一条路：四道限流闸、
+        // L3 仲裁、参数不可用转追问开槽，全都复用。未接住（规则没了/被限流）也不
+        // 回落闲聊：模型已经口头回应过这条弹幕，再回一句就是双重响应。
+        void OnChatActionMarker(DouyinEvent ev, IntentKind kind, string arg)
+        {
+            if (!running) return;
+            if (debugLog) Debug.Log($"[DouyinLive] 聊天动作标记: {kind} / {arg}");
+            triggers?.TryHandleIntent(ev, kind, arg);
         }
 
         // ---------- 大头特写：关注/礼物时镜头推到脸部说感谢，说完恢复 ----------
