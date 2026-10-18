@@ -58,6 +58,7 @@ namespace DouyinLive
 
         SherpaWakeDetector wake;
         VoiceSessionMachine machine;   // 非空 = sherpa 模式
+        string loggedTransition;
 
         CustomDancePlayer.AvatarDanceHandler mmdDance;   // MMD 舞包的原曲不经 SongService，要单独盯
         float mmdNextFind;
@@ -224,7 +225,9 @@ namespace DouyinLive
                 Execute(machine.OnWake(now, talking, performing));
             }
             if (machine != null)
-                Execute(machine.Update(now, chunk != null && frameRms >= VoicedRms, talking, performing));
+                // 本帧麦克风没有新数据（设备按块推进，高帧率常见）传 null：状态机沿用上一帧，
+                // 当成无声会把追问「连续开口 0.3 秒」的计时清零
+                Execute(machine.Update(now, chunk == null ? (bool?)null : frameRms >= VoicedRms, talking, performing));
         }
 
         // 音量检测模式（v1 行为）：角色出声期间暂停监听防自触发；起音即唤醒；靠静音判定说完
@@ -290,6 +293,12 @@ namespace DouyinLive
 
         void Execute(IReadOnlyList<VoiceAction> actions)
         {
+            // 每次状态转换打一行原因：「她为什么等了 8 秒才回」「追问为什么没接上」全靠它回答
+            if (debugLog && machine != null && machine.LastTransition != loggedTransition)
+            {
+                loggedTransition = machine.LastTransition;
+                Debug.Log($"[Voice] 会话 {loggedTransition}（本帧 rms={frameRms:F3}）");
+            }
             if (actions == null || actions.Count == 0) return;
             // 状态机返回的是内部复用列表；执行中的回调（应答没音频时同步回调 OnAckFinished）
             // 会再次调用状态机改写它，必须先拷贝
@@ -303,6 +312,7 @@ namespace DouyinLive
                     case VoiceAction.InterruptSpeech: speech?.InterruptCurrent(); break;
                     case VoiceAction.HoldSpeech: speech?.SetHold(true); break;
                     case VoiceAction.ReleaseSpeech: speech?.SetHold(false); break;
+                    case VoiceAction.ReleaseNewSpeech: speech?.ReleaseNewOnly(); break;
                     case VoiceAction.DuckMusic: DuckMusic(); break;
                     case VoiceAction.UnduckMusic: UnduckMusic(); break;
                     case VoiceAction.StartCapture: buffer?.NotifyWake(WakePreRoll); break;

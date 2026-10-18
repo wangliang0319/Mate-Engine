@@ -94,6 +94,7 @@ namespace DouyinLive
         bool speaking;
         Coroutine speakRoutine;
         bool hold;              // 主播说话期间暂停出队（队列保留）
+        long backlogSeq = -1;   // >=0 时：序号不大于它的（会话前积压的）继续压着，只放行新入队的
         bool lingering;         // 说完后气泡停留阶段
         AudioClip ownedClip;    // 当前正在播、归本管线所有的 TTS 片段（被打断时要销毁）
 
@@ -281,10 +282,20 @@ namespace DouyinLive
             lock (pending) pending.Clear();
         }
 
-        // 主播说话期间暂停出队：队列保留，TTL 照常过期（过期的欢迎、点赞感谢该丢就丢）
+        // 主播说话期间暂停出队：队列保留，TTL 照常过期（过期的欢迎、点赞感谢该丢就丢）。
+        // SetHold(false) 完全放开，包括 ReleaseNewOnly 压着的积压。
         public void SetHold(bool on)
         {
             hold = on;
+            lock (pending) backlogSeq = -1;
+        }
+
+        // 等她回答主播时用：只放行此刻之后入队的（她的回答），会话前积压的弹幕继续压着，
+        // 直到 SetHold(false)。否则积压的弹幕先播，会被语音会话误当成「她在回答」。
+        public void ReleaseNewOnly()
+        {
+            lock (pending) backlogSeq = seqCounter;
+            hold = false;
         }
 
         // 打断当前这一条（连同它剩下的句子），队列保留。主播唤醒时调用。
@@ -340,8 +351,12 @@ namespace DouyinLive
                 if (pending.Count == 0) return null;
                 SpeechItem best = null;
                 foreach (var p in pending)
+                {
+                    if (backlogSeq >= 0 && p.Seq <= backlogSeq) continue;   // 语音会话前积压的，等会话结束
                     if (best == null || p.Prio < best.Prio || (p.Prio == best.Prio && p.Seq < best.Seq))
                         best = p;
+                }
+                if (best == null) return null;
                 pending.Remove(best);
                 return best;
             }

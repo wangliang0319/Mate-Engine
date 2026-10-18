@@ -190,11 +190,13 @@ namespace DouyinLive.Tests
         // ---------- 处理 ----------
 
         [Test]
-        public void 转写成功_注入并放开播报()
+        public void 转写成功_注入并只放开新播报()
         {
+            // 只放行唤醒之后入队的（她的回答）；会话前积压的弹幕留到回待机再播，
+            // 否则积压弹幕会被当成「她在回答」提前开追问，真正的回答反被压住
             var m = Processing();
             var a = L(m.OnTranscript(5f, " 唱一首黄昏 "));
-            CollectionAssert.AreEqual(new[] { VoiceAction.Inject, VoiceAction.ReleaseSpeech }, a);
+            CollectionAssert.AreEqual(new[] { VoiceAction.Inject, VoiceAction.ReleaseNewSpeech }, a);
             Assert.AreEqual("唱一首黄昏", m.PendingCommand);
             Assert.AreEqual(VoiceSessionState.AwaitReply, m.State);
         }
@@ -371,6 +373,78 @@ namespace DouyinLive.Tests
         public void 待机中止_无动作()
         {
             Assert.AreEqual(0, M().Abort().Count);
+        }
+
+        // ---------- 审校修复：空帧、积压播报、转换原因 ----------
+
+        // 麦克风有些帧没有新数据（null）：沿用上一帧的有声/无声，不能把起音计时清零
+        static List<VoiceAction> RunGappy(VoiceSessionMachine m, float from, float to)
+        {
+            var all = new List<VoiceAction>();
+            int n = (int)System.Math.Round((to - from) / 0.01f);
+            for (int i = 0; i <= n; i++)
+                all.AddRange(m.Update(from + i * 0.01f, i % 2 == 0 ? (bool?)true : null, false, false));
+            return all;
+        }
+
+        [Test]
+        public void 追问起音_空帧不清零()
+        {
+            var m = FollowUp();
+            var a = RunGappy(m, 7.01f, 7.5f);
+            Assert.Contains(VoiceAction.StartCapture, a);
+            Assert.AreEqual(VoiceSessionState.Listening, m.State);
+        }
+
+        [Test]
+        public void 追问_无声后的空帧不算开口()
+        {
+            var m = FollowUp();
+            m.Update(7.01f, false, false, false);
+            var a = new List<VoiceAction>();
+            for (int i = 1; i <= 50; i++) a.AddRange(m.Update(7.01f + i * 0.01f, null, false, false));
+            Assert.IsFalse(a.Contains(VoiceAction.StartCapture));
+        }
+
+        [Test]
+        public void 等回应结束回待机_完全放开积压()
+        {
+            var m = Processing();
+            m.OnTranscript(5f, "你好");
+            var a = Run(m, 5.02f, 20.1f, false);
+            Assert.Contains(VoiceAction.ReleaseSpeech, a);
+        }
+
+        [Test]
+        public void 等回应阶段唤醒_重新完全暂停()
+        {
+            var m = Processing();
+            m.OnTranscript(5f, "你好");
+            Assert.Contains(VoiceAction.HoldSpeech, L(m.OnWake(6f, true, false)));
+        }
+
+        [Test]
+        public void 转换原因_录满上限()
+        {
+            var m = ListeningAfterAck();
+            Run(m, 1.02f, 9.1f, true);
+            StringAssert.Contains("录满", m.LastTransition);
+        }
+
+        [Test]
+        public void 转换原因_应答后没开口()
+        {
+            var m = ListeningAfterAck();
+            Run(m, 1.02f, 6.1f, false);
+            StringAssert.Contains("没开口", m.LastTransition);
+        }
+
+        [Test]
+        public void 转换原因_追问转写太短()
+        {
+            var m = ProcessingFromFollowUp();
+            m.OnTranscript(9f, "嗯");
+            StringAssert.Contains("不足 2 字", m.LastTransition);
         }
     }
 }
