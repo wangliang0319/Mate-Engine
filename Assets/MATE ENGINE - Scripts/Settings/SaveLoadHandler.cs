@@ -198,8 +198,21 @@ public class SaveLoadHandler : MonoBehaviour
         public float douyinAIReplyMinInterval = 8f;
         public int douyinLikeThreshold = 100;
         public string douyinLivePrompt = "";
-        // 弹幕处理模式：0=AI聊天（AI 详细回复并引导观众继续聊）1=游戏陪播（带昵称念弹幕，主播人工回复）
+        // 已废弃：被 douyinScene 取代，只在 douyinScene 缺失时读取一次用于迁移（0=AI聊天 1=游戏陪播）
         public int douyinChatMode = 0;
+        // 直播场景：0=AI独播 1=游戏陪播 2=搭档主持（见 Docs/superpowers/specs/2026-10-18-douyin-live-scenes-design.md）。
+        // -1=尚未迁移，启动时由 MigrateAfterLoad 从 douyinChatMode 推导一次
+        public int douyinScene = -1;
+        public float douyinQuietMinutes = 5f;   // 「安静一会儿」的时长（装配时钳 0.5~120）
+        // 主播控制指令的说法（只认句首）。默认值与 DouyinLive.OperatorCommandWords 一致
+        public List<string> douyinCmdSwitchPrefixes = new() { "切到", "切换到", "换到" };
+        public List<string> douyinCmdSceneGame = new() { "游戏", "陪播" };
+        public List<string> douyinCmdSceneDuo = new() { "搭档", "主持", "双人" };
+        public List<string> douyinCmdSceneSolo = new() { "独播", "自己播" };
+        public List<string> douyinCmdStop = new() { "别唱了", "别跳了", "停一下" };
+        public List<string> douyinCmdClearQueue = new() { "别念了", "清空弹幕" };
+        public List<string> douyinCmdQuiet = new() { "安静一会儿", "先别说话" };
+        public List<string> douyinCmdResume = new() { "可以说话了", "恢复" };
         // 游戏陪播模式下念两条弹幕的最小间隔（秒），弹幕洪峰时旧念读还会被同优先级新念读挤掉
         public float douyinReadInterval = 5f;
         public bool douyinIdleChatterEnabled = true;
@@ -326,6 +339,13 @@ public class SaveLoadHandler : MonoBehaviour
         if (data.douyinIdleSongList == null || songs.Count != data.douyinIdleSongList.Count)
         {
             data.douyinIdleSongList = songs;
+            changed = true;
+        }
+
+        // 直播场景：老配置只有 douyinChatMode，迁移一次后存盘，之后只读 douyinScene
+        if (data.douyinScene < 0)
+        {
+            data.douyinScene = (int)DouyinLive.LiveSceneMigration.Resolve(-1, data.douyinChatMode, out _);
             changed = true;
         }
 

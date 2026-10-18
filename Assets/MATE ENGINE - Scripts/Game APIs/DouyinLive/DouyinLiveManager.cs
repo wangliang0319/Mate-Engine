@@ -63,8 +63,16 @@ namespace DouyinLive
             client != null ? client.ConnectionState : DouyinLiveClient.State.Stopped;
         public long SessionLikes => like.SessionTotal;
         public int SessionReplies => danmakuAI.RepliedCount;
-        // 0=AI聊天 1=游戏陪播。直播中可变（F9/设置页），读方要现读现用
-        public int ChatMode { get; private set; }
+        // 直播场景与安静状态。直播中可变（F9/主播语音），读方要现读现用
+        LiveScene scene = LiveScene.Solo;
+        bool quiet;
+        float quietUntil;
+        float quietMinutes = 5f;
+        LiveBehavior behavior;
+        OperatorCommandWords cmdWords = new OperatorCommandWords();
+        public LiveScene Scene => scene;
+        // 旧接口兼容：1=游戏陪播，其余=0
+        public int ChatMode => scene == LiveScene.Game ? 1 : 0;
 
         void Awake()
         {
@@ -138,9 +146,7 @@ namespace DouyinLive
             danmakuAI.Enabled = d.douyinAIReplyEnabled;
             danmakuAI.MinInterval = d.douyinAIReplyMinInterval;
             danmakuAI.ExtraPersona = d.douyinLivePrompt;
-            danmakuAI.VerboseChat = d.douyinChatMode == 0;   // AI 聊天模式回复要详细并引导话题
             danmakuAI.OnActionMarker = OnChatActionMarker;   // 聊天模型说「那我唱咯【唱歌:晴天】」
-            ChatMode = d.douyinChatMode;
 
             reader.Speech = speech;
             reader.Interval = Mathf.Max(1f, d.douyinReadInterval);
@@ -159,13 +165,25 @@ namespace DouyinLive
             idleChatter.Speech = speech;
             idleChatter.AI = danmakuAI;
             idleChatter.Song = songService;
-            idleChatter.Enabled = d.douyinIdleChatterEnabled;
-            idleChatter.IdleThreshold = d.douyinIdleThreshold;
-            idleChatter.AutoSongEnabled = d.douyinIdleAutoSongEnabled;
             idleChatter.AutoSongIdleThreshold = d.douyinIdleAutoSongThreshold;
             idleChatter.AutoSongMinInterval = d.douyinIdleAutoSongMinInterval;
             idleChatter.SongList = d.douyinIdleSongList ?? new List<string>();
-            idleChatter.AutoDanceEnabled = d.douyinIdleAutoDanceEnabled;
+
+            // 直播场景：douyinScene 已由 SaveLoadHandler.MigrateAfterLoad 迁移；越界按独播并警告
+            scene = LiveSceneMigration.Resolve(d.douyinScene, d.douyinChatMode, out bool sceneOutOfRange);
+            if (sceneOutOfRange)
+                Debug.LogWarning($"[DouyinLive] douyinScene={d.douyinScene} 无效（只能是 0/1/2），按 AI 独播处理");
+            quietMinutes = Mathf.Clamp(d.douyinQuietMinutes, 0.5f, 120f);
+            cmdWords = new OperatorCommandWords();
+            if (d.douyinCmdSwitchPrefixes != null) cmdWords.SwitchPrefixes = d.douyinCmdSwitchPrefixes;
+            if (d.douyinCmdSceneGame != null) cmdWords.SceneGame = d.douyinCmdSceneGame;
+            if (d.douyinCmdSceneDuo != null) cmdWords.SceneDuo = d.douyinCmdSceneDuo;
+            if (d.douyinCmdSceneSolo != null) cmdWords.SceneSolo = d.douyinCmdSceneSolo;
+            if (d.douyinCmdStop != null) cmdWords.Stop = d.douyinCmdStop;
+            if (d.douyinCmdClearQueue != null) cmdWords.ClearQueue = d.douyinCmdClearQueue;
+            if (d.douyinCmdQuiet != null) cmdWords.Quiet = d.douyinCmdQuiet;
+            if (d.douyinCmdResume != null) cmdWords.Resume = d.douyinCmdResume;
+            ApplyBehavior();
 
             // 直播期间大头模式保持窗口尺寸不变（窗口突变会导致直播伴侣采集画面裁切错乱）
             if (d.enableDouyinLive)
@@ -287,6 +305,7 @@ namespace DouyinLive
             client?.Stop();
             client = null;
             running = false;
+            ExitQuiet(false);   // 安静不跨场次：别把低优先级静音留到下次开播
             speech.ClearQueue();
             // 意图判定是 1.5 秒的异步调用，停播时可能还有一次在途；它的回调走
             // MainThreadDispatcher，不受下面 Update 的 running 早退保护，所以这里
@@ -300,7 +319,8 @@ namespace DouyinLive
         void Update()
         {
             MainThreadDispatcher.Drain();
-            UpdateChatMode();
+            UpdateSceneKey();
+            if (quiet && running && Time.unscaledTime >= quietUntil) ExitQuiet(true);
             if (!running || client == null) return;
 
             bool blocked = IsBlocked();
@@ -323,22 +343,111 @@ namespace DouyinLive
             audience.SaveIfDirty();
         }
 
-        // 直播中途切换弹幕处理模式。游戏陪播的主播人在游戏里，
-        // 切换成功与否只能靠听——所以必须念一句确认，不能只写日志。
-        void UpdateChatMode()
+        // 场景与安静变化后重新解析并下发。场景规则全在 LiveSceneResolver，这里只搬运结果
+        void ApplyBehavior()
         {
-            if (chatModeKey == KeyCode.None || !Input.GetKeyDown(chatModeKey)) return;
             var d = SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data : null;
             if (d == null) return;
+            behavior = LiveSceneResolver.Resolve(scene, quiet, new LiveSwitches
+            {
+                AiReply = d.douyinAIReplyEnabled,
+                IdleChatter = d.douyinIdleChatterEnabled,
+                IdleThreshold = d.douyinIdleThreshold,
+                AutoSong = d.douyinIdleAutoSongEnabled,
+                AutoDance = d.douyinIdleAutoDanceEnabled
+            });
+            // danmakuAI.Enabled 不随场景/安静变：主播和她聊天也走它，安静时观众弹幕在 Route 里拦
+            danmakuAI.VerboseChat = behavior.Danmaku == DanmakuHandling.AiVerbose;
+            idleChatter.Enabled = behavior.IdleChatter;
+            idleChatter.IdleThreshold = behavior.IdleThreshold;
+            idleChatter.AutoSongEnabled = behavior.AutoSong;
+            idleChatter.AutoDanceEnabled = behavior.AutoDance;
+            speech.SetLowPriorityMute(behavior.MuteLowPriority);
+        }
 
-            d.douyinChatMode = ChatMode == 0 ? 1 : 0;
-            SaveLoadHandler.Instance.SaveToDisk();
-            ApplySettings();
-            speech.Enqueue(
-                ChatMode == 1 ? "切到游戏陪播模式啦，弹幕我来念，你安心打游戏~"
-                              : "切回AI聊天模式，我来接弹幕～",
-                SpeechPipeline.Priority.Milestone, 15f);
-            if (debugLog) Debug.Log($"[DouyinLive] ChatMode -> {ChatMode}");
+        // F9 在三个场景间循环。游戏陪播的主播人在游戏里，切换成功与否只能靠听，所以必须念确认
+        void UpdateSceneKey()
+        {
+            if (chatModeKey == KeyCode.None || !Input.GetKeyDown(chatModeKey)) return;
+            SwitchScene((LiveScene)(((int)scene + 1) % 3), true);
+        }
+
+        static string SceneName(LiveScene s) =>
+            s == LiveScene.Game ? "游戏陪播" : s == LiveScene.Duo ? "搭档主持" : "AI独播";
+
+        // 主播指令的反馈用 AIReply：安静期间低优先级静音不能吞掉它，主播要听到确认
+        void Say(string text) => speech.Enqueue(text, SpeechPipeline.Priority.AIReply, 15f);
+
+        // F9 与主播语音「切到…」共用。写入配置并存盘，重启后沿用
+        public void SwitchScene(LiveScene target, bool announce)
+        {
+            if (target == scene)
+            {
+                if (announce) Say($"已经是{SceneName(target)}模式啦～");
+                return;
+            }
+            scene = target;
+            var d = SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data : null;
+            if (d != null)
+            {
+                d.douyinScene = (int)target;
+                SaveLoadHandler.Instance.SaveToDisk();
+            }
+            ApplyBehavior();
+            if (announce)
+                Say(target == LiveScene.Game ? "切到游戏陪播模式啦，弹幕我来念，你安心打游戏～"
+                  : target == LiveScene.Duo ? "切到搭档主持模式啦，我少说两句，把话头留给你～"
+                  : "切到AI独播模式啦，弹幕我来接～");
+            if (debugLog) Debug.Log($"[DouyinLive] 场景 -> {target}");
+        }
+
+        void EnterQuiet()
+        {
+            quietUntil = Time.unscaledTime + quietMinutes * 60f;   // 安静中再说一次 = 重新计时
+            if (!quiet)
+            {
+                quiet = true;
+                reader.ResetSession();       // 排队待念的弹幕作废
+                danmakuAI.ClearPending();    // 排队待回复的弹幕作废（对话历史保留）
+                ApplyBehavior();             // 关暖场/自动唱跳，开低优先级静音（顺带清掉已排队的欢迎/答谢）
+            }
+            Say($"好，我先安静{quietMinutes:0.#}分钟～");
+            if (debugLog) Debug.Log($"[DouyinLive] 进入安静 {quietMinutes:0.#} 分钟");
+        }
+
+        void ExitQuiet(bool announce)
+        {
+            if (!quiet) return;
+            quiet = false;
+            ApplyBehavior();
+            if (announce) Say("我回来啦～");
+            if (debugLog) Debug.Log("[DouyinLive] 退出安静");
+        }
+
+        void StopPerformance()
+        {
+            bool stopped = false;
+            if (songService != null && songService.IsPlaying) { songService.StopSong(); stopped = true; }
+            var director = GetComponent<DanceDirector>();
+            if (director != null && director.Busy) { director.StopAll(); stopped = true; }
+            if (stopped) Say("好～");   // 本来就没在唱跳：不出声
+        }
+
+        void ExecuteOperatorCommand(OperatorCommandKind kind, LiveScene target)
+        {
+            switch (kind)
+            {
+                case OperatorCommandKind.SwitchScene: SwitchScene(target, true); break;
+                case OperatorCommandKind.UnknownScene: Say("没有这个模式哦，可以说游戏陪播、搭档主持或独播～"); break;
+                case OperatorCommandKind.StopPerformance: StopPerformance(); break;
+                case OperatorCommandKind.ClearQueue:
+                    speech.ClearQueue();
+                    reader.ResetSession();
+                    danmakuAI.ClearPending();
+                    break;
+                case OperatorCommandKind.Quiet: EnterQuiet(); break;
+                case OperatorCommandKind.Resume: ExitQuiet(true); break;   // 没在安静：ExitQuiet 直接返回，不出声
+            }
         }
 
         void Route(DouyinEvent ev)
@@ -364,6 +473,18 @@ namespace DouyinLive
             else if (ev.Type == DouyinMsgType.Like)
             {
                 like.RecordOnly(ev);   // 会话点赞总数不能因为被触发规则消费而漏计
+            }
+
+            // 安静：观众侧只记账不响应（上面已记账）。礼物只说答谢语、不跳舞不特写、不走触发规则；
+            // 进房/关注仍交给欢迎服务——它负责记录来访，欢迎语由播报低优先级静音吞掉。
+            // 主播语音（FromVoice）不受影响。
+            if (!behavior.RespondToAudience && !ev.FromVoice)
+            {
+                if (ev.Type == DouyinMsgType.Gift) reward.ThankOnly(ev);
+                else if (ev.Type == DouyinMsgType.Enter || ev.Type == DouyinMsgType.Share ||
+                         ev.Type == DouyinMsgType.FansClub || ev.Type == DouyinMsgType.Follow)
+                    welcome.OnEvent(ev);
+                return;
             }
 
             if (triggers != null)
@@ -429,8 +550,8 @@ namespace DouyinLive
             }
             // 游戏陪播：AI 不掺和，带昵称念出来，主播听声人工回复。
             // 指令弹幕（触发规则/槽位/点歌等）在进到这里之前就已被消费。
-            if (ChatMode == 1) reader.OnDanmaku(ev);
-            else danmakuAI.OnDanmaku(ev);
+            if (behavior.Danmaku == DanmakuHandling.Read) reader.OnDanmaku(ev);
+            else if (behavior.Danmaku != DanmakuHandling.Ignore) danmakuAI.OnDanmaku(ev);
         }
 
         // 传话/聊天回调：分类是 1.5 秒异步，停播后回来不能开口（同 OnIntentResolved 的 running 守卫）
@@ -458,6 +579,13 @@ namespace DouyinLive
         {
             if (string.IsNullOrWhiteSpace(text)) return;
             if (!running || IsBlocked()) return;
+            // 主播控制指令最先：「别唱了」若先进弹幕管线，「唱」字会被当成点歌意图
+            if (OperatorCommandParser.TryParse(text, cmdWords, out var cmdKind, out var cmdScene))
+            {
+                if (debugLog) Debug.Log($"[DouyinLive] 主播指令: {cmdKind} {cmdScene}（{text}）");
+                ExecuteOperatorCommand(cmdKind, cmdScene);
+                return;
+            }
             // 开头词传话（「告诉大家八点下播」）先于 Route()：主播明确说了要播报，
             // 后半句里带「唱/歌」也不该先被当成点歌
             if (voiceRelayEnabled && VoiceRelayParser.TryExtractRelay(text, voiceRelayPrefixes, out var relay))
