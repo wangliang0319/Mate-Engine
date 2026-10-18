@@ -371,10 +371,35 @@ namespace DouyinLive
         void HandleChatLegacy(DouyinEvent ev)
         {
             if (reward.TryHandleDanmaku(ev)) return;
+            // 语音闲聊不走「念弹幕」：主播自己的话被角色念回给主播没有意义，
+            // 无论什么模式都走 AI 回复。
+            if (ev.FromVoice) { danmakuAI.OnDanmaku(ev); return; }
             // 游戏陪播：AI 不掺和，带昵称念出来，主播听声人工回复。
             // 指令弹幕（触发规则/槽位/点歌等）在进到这里之前就已被消费。
             if (ChatMode == 1) reader.OnDanmaku(ev);
             else danmakuAI.OnDanmaku(ev);
+        }
+
+        // ---------- 语音助手：麦克风命令伪装成弹幕进同一条链路 ----------
+
+        // VoiceCommandListener 转写完成后的唯一入口。停播/菜单打开时静默丢弃——
+        // 与弹幕「消费不响应」一致；在途 ASR 回调晚于停播到达也在这道闸拦住。
+        public void InjectVoiceChat(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return;
+            if (!running || IsBlocked()) return;
+            var d = SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data : null;
+            var ev = new DouyinEvent
+            {
+                Type = DouyinMsgType.Chat,
+                UserId = "voice",
+                Nickname = d != null && !string.IsNullOrWhiteSpace(d.douyinVoiceNickname) ? d.douyinVoiceNickname : "主播",
+                Content = text,
+                FromVoice = true,
+                ReceivedAt = DateTime.Now
+            };
+            if (debugLog) Debug.Log("[DouyinLive] 语音命令: " + text);
+            Route(ev);
         }
 
         void OnIntentResolved(DouyinEvent ev, IntentKind kind, string arg)

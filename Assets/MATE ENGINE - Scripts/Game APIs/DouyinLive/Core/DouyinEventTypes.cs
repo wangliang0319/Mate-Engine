@@ -32,5 +32,6 @@ namespace DouyinLive
         public int GiftCount;
         public int DiamondCount;
         public DateTime ReceivedAt;
+        public bool FromVoice;     // 语音助手注入的虚拟弹幕（UserId 固定 "voice"）
     }
 }
