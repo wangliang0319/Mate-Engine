@@ -372,11 +372,25 @@ namespace DouyinLive
 
             // song:request 从弹幕正文里剥掉命中的关键词，剩下的就是歌名
             string title = StripKeywords(ctx.Event?.Content ?? "", ctx.Rule);
+            // 主播语音只说「唱一首歌」时不反问，直接从配置歌单抽一首唱：直播里反问一句
+            // 就干等着，主播以为她没听懂。观众照旧追问并开槽等他补歌名。
+            if (string.IsNullOrWhiteSpace(title))
+                title = SongRequestFallback.PickForStreamer(
+                    ctx.Event?.FromVoice == true, title, ConfiguredSongList(),
+                    UnityEngine.Random.Range(0, int.MaxValue));
             // 只问不记是这个功能原来的 bug：观众答的歌名下一轮匹配不到任何规则，
             // 直接掉进 AI 闲聊。现在问的同时开一个槽位等他回答。
             if (string.IsNullOrWhiteSpace(title)) return AskAndOpenSlot(IntentKind.Song, ctx);
 
             return PlaySongTitle(s, title, name);
+        }
+
+        // 主播语音点歌抽歌用设置页里那份冷场歌单（douyinIdleSongList）。没接管理器就当没配，
+        // 退回追问。
+        static List<string> ConfiguredSongList()
+        {
+            var d = SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data : null;
+            return d != null ? d.douyinIdleSongList : null;
         }
 
         // 「点歌 赤伶」和两轮追问答出来的「赤伶」是同一个功能的两条路，表演必须一样，
