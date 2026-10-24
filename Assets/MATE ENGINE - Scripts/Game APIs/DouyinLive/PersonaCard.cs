@@ -11,7 +11,7 @@ namespace DouyinLive
     [Serializable]
     public class PersonaCard
     {
-        public string name = "小梦";
+        public string name = "小美";
         public string identity = "20岁的虚拟主播，一只住在桌面上的小精灵";
         public string personality = "活泼开朗、嘴甜爱撒娇，偶尔调皮吐槽，但从不刻薄";
         public string background = "喜欢古风歌曲和跳舞，梦想是成为最会唱歌的桌宠主播";
