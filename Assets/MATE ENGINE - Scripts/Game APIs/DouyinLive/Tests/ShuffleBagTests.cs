@@ -56,6 +56,36 @@ namespace DouyinLive.Tests
         }
 
         [Test]
+        public void 排除的索引本轮不再出现()
+        {
+            var bag = new ShuffleBag(seed: 7);
+            bag.Reset(5);
+            bag.Exclude(3);
+            for (int i = 0; i < 4; i++) Assert.AreNotEqual(3, bag.Next());
+        }
+
+        [Test]
+        public void 排除不存在的索引不影响供应()
+        {
+            var bag = new ShuffleBag(seed: 8);
+            bag.Reset(3);
+            bag.Exclude(99);
+            var seen = new List<int>();
+            for (int i = 0; i < 3; i++) seen.Add(bag.Next());
+            seen.Sort();
+            CollectionAssert.AreEqual(new[] { 0, 1, 2 }, seen);
+        }
+
+        [Test]
+        public void 标记已播后重洗不会紧接着再来()
+        {
+            var bag = new ShuffleBag(seed: 9);
+            bag.Reset(4);
+            bag.NoteServed(2);   // 袋子还是空的：下一位直接触发重洗
+            Assert.AreNotEqual(2, bag.Next());
+        }
+
+        [Test]
         public void 舞包数量变化后重置()
         {
             var bag = new ShuffleBag(seed: 6);

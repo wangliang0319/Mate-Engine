@@ -46,6 +46,7 @@ namespace DouyinLive
         string nowPlaying;
         Animator cachedAnimator;
         AvatarAnimatorController cachedAvatar;
+        DanceDirector danceDirector;
 
         public bool IsPlaying => playRoutine != null;
         public string NowPlaying => nowPlaying;
@@ -151,6 +152,21 @@ namespace DouyinLive
                 while (!bpmTask.IsCompleted) yield return null;
                 bpm = bpmTask.Status == TaskStatus.RanToCompletion ? bpmTask.Result : 0f;
                 Debug.Log($"[SongService] BPM ≈ {bpm:F0}");
+            }
+
+            // 在线点歌要接管 Animator：先把 MMD 点舞停掉并等它退场。否则两边抢
+            // Animator，而且它退场时的 UnfreezeAnimator 会把下面按 BPM 设的速度
+            // 还原成 1，整首歌的舞步速度就不对了。
+            if (danceDirector == null) danceDirector = FindFirstObjectByType<DanceDirector>();
+            if (danceDirector != null && danceDirector.Busy)
+            {
+                danceDirector.StopAll();
+                float stopWait = 0f;
+                while (danceDirector.Busy && stopWait < 2.5f)
+                {
+                    stopWait += Time.deltaTime;
+                    yield return null;
+                }
             }
 
             if (musicSource == null) musicSource = gameObject.AddComponent<AudioSource>();

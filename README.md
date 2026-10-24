@@ -382,8 +382,8 @@ CosyVoice 系列和 OpenAI 的请求形状有两处差异：
 | `mood:happy` `mood:love` `mood:sad` `mood:surprise` | 表情混合形状 |
 | `particle:<主题名>` | 切粒子主题 6 秒后还原。**目前只有 `Dance Trail Blue` 一个主题** |
 | `bigscreen` | 大头特写 |
-| `dance:random` / `dance:<舞名>` / `dance:builtin` | 跳舞。`random` 一轮之内不重复 |
-| `dance:request` / `dance:ask` | 点舞。`request` 先从弹幕正文取舞名，取不到就追问；`ask` 直接追问 |
+| `dance:random` / `dance:<舞名>` / `dance:builtin` | 跳舞。`random` 一轮之内不重复；左右版本、`-1/-2` 分段算同一支，点名刚播过的不会马上再随机到 |
+| `dance:request` / `dance:ask` | 点舞。`request` 先从弹幕正文取舞名（支持《》和只打英文名），取不到时观众追问、主播语音直接随机来一支；`ask` 直接追问 |
 | `song:<歌名>` / `song:request` / `song:ask` | 唱歌。`request` 先从弹幕正文取歌名，取不到就追问；`ask` 直接追问 |
 | `swapAvatar` / `swapAvatar:<角色名>` / `swapAvatar:request` / `swapAvatar:ask` | 换 VRM 角色，自动身高归一化。不带参数=随机；带名字按 `avatars.json` 的 `displayName` 模糊匹配 |
 | `outfit:random` / `outfit:<配件名>` | 切换配件 |
@@ -471,6 +471,10 @@ python Tools/douyin_mock_server.py        # 模拟弹幕服务器
 
 - 内置舞步仅 5 个动画；把 MMD 舞包放入 `StreamingAssets/CustomDances`，
   点歌时自动匹配同名舞包（真编舞 + 原曲音频，效果最佳）
+- 匹配会忽略书名号、空格、下划线和大小写：「点舞《sparkle》」能匹配 `sparkle_右_`；
+  左右版本和 `-1/-2` 分段算同一支，随机轮播不会连着放两个几乎一样的动作
+- 舞包支持子目录；每次开播会自动重扫目录，刚拖进去的舞不用重启
+- 一支舞跳完会说一句带舞名的谢幕；被点歌、「别跳了」或菜单打断时不说
 - 舞包资源可在 B 站 / 爱发电搜索 "MateEngine 舞蹈" 获取
 
 ## 已知限制

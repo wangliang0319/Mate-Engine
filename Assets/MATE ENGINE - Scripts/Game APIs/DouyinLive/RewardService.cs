@@ -73,10 +73,15 @@ namespace DouyinLive
                 if (d != null && !string.IsNullOrEmpty(title))
                 {
                     int idx = d.FindIndexByTitleFuzzy(title);
-                    if (idx >= 0 && d.PlayIndex(idx))
+                    if (idx >= 0)
                     {
-                        Speech?.Enqueue($"好嘞！{name} 点的 {title}，舞蹈版走起！", SpeechPipeline.Priority.GiftThanks, 30f);
-                        return true;
+                        StopSongForDance();
+                        if (d.PlayIndex(idx))
+                        {
+                            NoteDancePlayed(idx);
+                            Speech?.Enqueue($"好嘞！{name} 点的 {title}，舞蹈版走起！", SpeechPipeline.Priority.GiftThanks, 30f);
+                            return true;
+                        }
                     }
                 }
                 // 曲库没有 → 在线搜歌播放 + 跟随跳舞
@@ -316,14 +321,33 @@ namespace DouyinLive
                 Speech?.Enqueue($"曲库里没有找到 {title} 哦~", SpeechPipeline.Priority.AIReply, 20f);
                 return;
             }
+            StopSongForDance();
             if (d.PlayIndex(idx))
+            {
+                NoteDancePlayed(idx);
                 Speech?.Enqueue($"好嘞，{userName} 点的 {title}，马上安排！", SpeechPipeline.Priority.GiftThanks, 30f);
+            }
+        }
+
+        // 点舞要接管 Animator：正在放歌时先停歌，否则 BPM 调速会被 MMD 播放器
+        // 当成「原速」记住，整支舞会偏快；两边同时抢也容易互相打断。
+        void StopSongForDance()
+        {
+            if (Song != null && Song.IsPlaying) Song.StopSong();
+        }
+
+        void NoteDancePlayed(int index)
+        {
+            var director = UnityEngine.Object.FindFirstObjectByType<DanceDirector>();
+            if (director != null) director.NoteExternalPlay(index);
         }
 
         void PlayRandomDance()
         {
             var d = Dance;
-            if (d == null || !TryPlayRandomCustom(d)) PlayBuiltinDance();
+            if (d == null) { PlayBuiltinDance(); return; }
+            StopSongForDance();
+            if (!TryPlayRandomCustom(d)) PlayBuiltinDance();
         }
 
         bool TryPlayRandomCustom(AvatarDanceHandler d)

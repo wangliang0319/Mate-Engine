@@ -9,6 +9,8 @@ namespace DouyinLive
     public class ShuffleBag
     {
         readonly List<int> bag = new List<int>();
+        // 袋子空着时被排除的项，要留到下次 Refill 再跳过；否则 Exclude 等于没做
+        readonly HashSet<int> skipNextRefill = new HashSet<int>();
         readonly Random rng;
         int total;
         int lastServed = -1;
@@ -24,6 +26,7 @@ namespace DouyinLive
         {
             total = Math.Max(0, count);
             bag.Clear();
+            skipNextRefill.Clear();
             lastServed = -1;
         }
 
@@ -40,9 +43,26 @@ namespace DouyinLive
             return pick;
         }
 
+        // 外部已经播过这一项（观众点名点舞），本轮剩下的袋子里就别再发了。
+        // 袋子已经空了时没什么可删的——NoteServed 会让重洗避开它。
+        public void Exclude(int index)
+        {
+            bag.RemoveAll(i => i == index);
+            if (bag.Count == 0 && total > 0) skipNextRefill.Add(index);
+        }
+
+        // 让洗牌袋知道「这一项刚播过」。即使袋子是空的，下一次 Refill 也会把
+        // 它从末尾挪走，保证不会紧接着再发一次。
+        public void NoteServed(int index)
+        {
+            lastServed = index;
+        }
+
         void Refill()
         {
-            for (int i = 0; i < total; i++) bag.Add(i);
+            for (int i = 0; i < total; i++)
+                if (!skipNextRefill.Contains(i)) bag.Add(i);
+            skipNextRefill.Clear();
 
             // Fisher-Yates
             for (int i = bag.Count - 1; i > 0; i--)

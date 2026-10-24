@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using CustomDancePlayer;
 using LLMUnity;
 using Newtonsoft.Json;
 using UnityEngine;
@@ -222,6 +223,7 @@ namespace DouyinLive
             idleChatter.Dance = danceDirector;
             if (danceDirector != null)
             {
+                danceDirector.Speech = speech;   // 跳完一支的谢幕词
                 danceDirector.danceChainCount = Mathf.Max(1, d.douyinDanceChainCount);
                 danceDirector.danceParticleTheme = d.douyinDanceParticleTheme;
                 danceDirector.portraitSoftZoneRatio = Mathf.Clamp(d.douyinDancePortraitSoftZoneRatio, 0.05f, 0.4f);
@@ -291,6 +293,10 @@ namespace DouyinLive
             client.Start();
             running = true;
             motionDirector?.SetLive(true);
+            // 官方舞蹈播放器只在启动时扫一次目录：直播前刚拖进去的舞得手动重扫，
+            // 否则观众点舞会说「曲库里没有」。
+            var dancePlayer = FindFirstObjectByType<AvatarDanceHandler>(FindObjectsInactive.Include);
+            if (dancePlayer != null) dancePlayer.RescanMods();
             welcome.ResetSession();
             room.ResetSession();
             liveOps.ResetSession();

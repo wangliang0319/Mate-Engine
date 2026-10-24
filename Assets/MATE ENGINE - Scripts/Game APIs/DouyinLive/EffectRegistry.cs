@@ -263,6 +263,15 @@ namespace DouyinLive
 
         DanceDirector danceDirector;
 
+        // 点舞会接管 Animator：正在放歌时先停歌。否则 SongService 的 BPM 调速
+        // 会被 AvatarDanceHandler.FreezeAnimator 记成「原速」，整支舞会以 1.2~1.35
+        // 倍速播完；反过来在线点歌也会把 MMD 点舞掐掉，两条路互相抢。
+        void StopSongForDance()
+        {
+            var s = Song;
+            if (s != null && s.IsPlaying) s.StopSong();
+        }
+
         bool PlayDance(string arg, EffectContext ctx)
         {
             if (arg == "ask") return AskAndOpenSlot(IntentKind.Dance, ctx);
@@ -272,12 +281,33 @@ namespace DouyinLive
             if (arg == "request")
             {
                 string title = StripKeywords(ctx.Event?.Content ?? "", ctx.Rule);
-                if (string.IsNullOrWhiteSpace(title)) return AskAndOpenSlot(IntentKind.Dance, ctx);
+                // 主播语音只说「跳支舞」时不反问：直播里问完就干等着，像没听懂。
+                // 观众照旧追问并开槽等他补舞名。
+                if (string.IsNullOrWhiteSpace(title))
+                {
+                    if (ctx.Event?.FromVoice == true)
+                    {
+                        Say("好呀，那我随便来一支~");
+                        return PlayDance("random", ctx);
+                    }
+                    return AskAndOpenSlot(IntentKind.Dance, ctx);
+                }
 
                 if (d != null)
                 {
                     int i = d.FindIndexByTitleFuzzy(title);
-                    if (i >= 0 && d.PlayIndex(i)) { Say($"好嘞，{title} 来咯！"); return true; }
+                    if (i >= 0)
+                    {
+                        StopSongForDance();
+                        if (d.PlayIndex(i))
+                        {
+                            NoteDancePlayed(i);
+                            Say($"好嘞，{title} 来咯！");
+                            return true;
+                        }
+                        // 找到了但播放器还没准备好：别顺着往下说「曲库里没有」
+                        return PlayDance("random", ctx);
+                    }
                 }
                 // 点名的舞包没有就随便来一支，别让观众的请求石沉大海
                 Say($"曲库里还没有 {title}，先随便来一支吧~");
@@ -289,7 +319,11 @@ namespace DouyinLive
             if (arg == "random")
             {
                 if (danceDirector == null) danceDirector = FindFirstObjectByType<DanceDirector>();
-                if (danceDirector != null && danceDirector.PlayRandom()) return true;
+                if (danceDirector != null)
+                {
+                    StopSongForDance();
+                    if (danceDirector.PlayRandom()) return true;
+                }
                 return PlayBuiltinDance();
             }
 
@@ -303,8 +337,21 @@ namespace DouyinLive
                 Say($"曲库里还没有 {arg}，先随便来一支吧~");
                 return PlayDance("random", ctx);
             }
-            if (d.PlayIndex(idx)) return true;
+            StopSongForDance();
+            if (d.PlayIndex(idx))
+            {
+                NoteDancePlayed(idx);
+                return true;
+            }
             return PlayBuiltinDance();
+        }
+
+        // 点名播的舞不经过 DanceDirector 的洗牌袋，告诉它「刚播过」，
+        // 否则紧接着的「随便来一支」可能又是同一支。
+        void NoteDancePlayed(int index)
+        {
+            if (danceDirector == null) danceDirector = FindFirstObjectByType<DanceDirector>();
+            if (danceDirector != null) danceDirector.NoteExternalPlay(index);
         }
 
         bool PlayBuiltinDance()
@@ -402,10 +449,15 @@ namespace DouyinLive
             if (d != null)
             {
                 int idx = d.FindIndexByTitleFuzzy(title);
-                if (idx >= 0 && d.PlayIndex(idx))
+                if (idx >= 0)
                 {
-                    Say($"好嘞！{name} 点的 {title}，舞蹈版走起！");
-                    return true;
+                    StopSongForDance();   // 已经在放歌时点同名舞，先停歌，别两边抢 Animator
+                    if (d.PlayIndex(idx))
+                    {
+                        NoteDancePlayed(idx);
+                        Say($"好嘞！{name} 点的 {title}，舞蹈版走起！");
+                        return true;
+                    }
                 }
             }
             s.RequestSong(title, name);

@@ -6,6 +6,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
+using DouyinLive;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -989,21 +990,19 @@ namespace CustomDancePlayer
         public int EntryCount => entries.Count;
         public string GetEntryTitle(int index) => (index >= 0 && index < entries.Count) ? entries[index].id : null;
 
-        // Case-insensitive substring match (both directions) for danmaku song requests.
+        // 点舞时把观众说的名字对到舞包标题。旧实现是双向子串 + 取第一个，
+        // 会漏掉带书名号的请求、永远命中左版本，还会把 "Love Story" 错配到
+        // "lap tap love"。现在交给 Core 的 DanceTitleMatch 打分，同分（左右版本、
+        // 同名包）随机挑一个。
         public int FindIndexByTitleFuzzy(string title)
         {
-            if (string.IsNullOrEmpty(title)) return -1;
+            if (string.IsNullOrEmpty(title) || entries.Count == 0) return -1;
             int exact = FindIndexByTitle(title);
             if (exact >= 0) return exact;
-            string t = title.Trim().ToLowerInvariant();
-            for (int i = 0; i < entries.Count; i++)
-            {
-                var id = entries[i].id;
-                if (string.IsNullOrEmpty(id)) continue;
-                var e = id.ToLowerInvariant();
-                if (e.Contains(t) || t.Contains(e)) return i;
-            }
-            return -1;
+
+            var titles = new List<string>(entries.Count);
+            for (int i = 0; i < entries.Count; i++) titles.Add(entries[i].id);
+            return DanceTitleMatch.FindBest(titles, title, UnityEngine.Random.Range(0, int.MaxValue));
         }
 
         bool IsModEnabled(string id)

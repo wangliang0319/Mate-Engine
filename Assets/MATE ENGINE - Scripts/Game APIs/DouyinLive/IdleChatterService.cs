@@ -118,8 +118,19 @@ namespace DouyinLive
                     autoSongClockStarted = true;
                     lastAutoSongAt = now;
                     lastChatterAt = now;
-                    lastAutoWasSong = true;
                     string pick = SongList[rng.Next(SongList.Count)];
+
+                    // 曲库里有同名真编舞就跳它：真编舞 + 原曲音频，比在线搜歌效果好，
+                    // 也避免「明明有这支舞却去唱」的割裂感。
+                    if (Dance != null && Dance.PlayByTitle(pick))
+                    {
+                        lastAutoWasSong = false;
+                        Speech.Enqueue($"好像有点安静呢，那我来给大家跳一支 {pick} 吧~",
+                            SpeechPipeline.Priority.LikeThanks, 30f);
+                        return;
+                    }
+
+                    lastAutoWasSong = true;
                     Speech.Enqueue($"好像有点安静呢，那我来给大家唱一首 {pick} 吧~",
                         SpeechPipeline.Priority.LikeThanks, 30f);
                     Song.RequestSong(pick, null);   // null = 自动唱歌，不播报点歌提示
