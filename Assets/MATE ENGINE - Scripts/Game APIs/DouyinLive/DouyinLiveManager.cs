@@ -31,6 +31,7 @@ namespace DouyinLive
         SpeechPipeline speech;
         DouyinLiveClient client;
         SongService songService;
+        LiveMotionDirector motionDirector;
 
         readonly WelcomeService welcome = new WelcomeService();
         readonly LikeService like = new LikeService();
@@ -79,6 +80,9 @@ namespace DouyinLive
             if (Instance != null && Instance != this) { Destroy(this); return; }
             Instance = this;
             speech = GetComponent<SpeechPipeline>();
+            // 直播时让动作随机轮换、偶尔来个小动作；组件常驻，开播才生效
+            motionDirector = GetComponent<LiveMotionDirector>();
+            if (motionDirector == null) motionDirector = gameObject.AddComponent<LiveMotionDirector>();
         }
 
         void Start()
@@ -286,6 +290,7 @@ namespace DouyinLive
             client = new DouyinLiveClient { Url = url, DebugLog = debugLog };
             client.Start();
             running = true;
+            motionDirector?.SetLive(true);
             welcome.ResetSession();
             room.ResetSession();
             liveOps.ResetSession();
@@ -305,6 +310,7 @@ namespace DouyinLive
             client?.Stop();
             client = null;
             running = false;
+            motionDirector?.SetLive(false);
             ExitQuiet(false);   // 安静不跨场次：别把低优先级静音留到下次开播
             speech.ClearQueue();
             // 意图判定是 1.5 秒的异步调用，停播时可能还有一次在途；它的回调走

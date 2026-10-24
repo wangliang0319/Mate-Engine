@@ -3,6 +3,7 @@ using NAudio.CoreAudioApi;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Collections;
+using DouyinLive;
 
 public class AvatarAnimatorController : MonoBehaviour
 {
@@ -21,6 +22,13 @@ public class AvatarAnimatorController : MonoBehaviour
     public float DANCE_TRANSITION_TIME = 2f;       
 
     public bool BlockDraggingOverride = false;
+
+    [Header("Live Variety (抖音直播)")]
+    // 直播中由 LiveMotionDirector 打开：空闲姿势和舞蹈都随机轮换、不连续重复，
+    // 换动作也更勤快。默认关，桌面正常使用时保持原来的顺序循环。
+    public bool liveMotionVariety = false;
+    public float liveIdleSwitchTime = 7f;
+    public float liveDanceSwitchTime = 10f;
 
     private static readonly int danceIndexParam = Animator.StringToHash("DanceIndex");
     private static readonly int isIdleParam = Animator.StringToHash("isIdle");
@@ -159,10 +167,12 @@ public class AvatarAnimatorController : MonoBehaviour
         else if (!mouseHeld && isDragging) SetDragging(false);
 
         idleTimer += Time.deltaTime;
-        if (idleTimer > IDLE_SWITCH_TIME)
+        if (idleTimer > (liveMotionVariety ? liveIdleSwitchTime : IDLE_SWITCH_TIME))
         {
             idleTimer = 0f;
-            int next = (idleState + 1) % totalIdleAnimations;
+            int next = liveMotionVariety
+                ? MotionVariety.NextIndex(idleState, totalIdleAnimations, Random.Range(0, int.MaxValue))
+                : (idleState + 1) % totalIdleAnimations;
             if (next == 0) animator.SetFloat(idleIndexParam, 0);
             else
             {
@@ -173,13 +183,15 @@ public class AvatarAnimatorController : MonoBehaviour
         }
         UpdateIdleStatus();
 
-        if (isDancing && enableDanceSwitch)
+        if (isDancing && (enableDanceSwitch || liveMotionVariety))
         {
             danceTimer += Time.deltaTime;
-            if (danceTimer > DANCE_SWITCH_TIME)
+            if (danceTimer > (liveMotionVariety ? liveDanceSwitchTime : DANCE_SWITCH_TIME))
             {
                 danceTimer = 0f;
-                int nextDance = (danceState + 1) % DANCE_CLIP_COUNT;
+                int nextDance = liveMotionVariety
+                    ? MotionVariety.NextIndex(danceState, DANCE_CLIP_COUNT, Random.Range(0, int.MaxValue))
+                    : (danceState + 1) % DANCE_CLIP_COUNT;
                 if (nextDance == 0) animator.SetFloat(danceIndexParam, 0);
                 else
                 {
